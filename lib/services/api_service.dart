@@ -1,20 +1,15 @@
 import 'dart:convert';
-import 'dart:io';
-import 'package:http/http.dart' as http;
-import 'package:http/io_client.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:http/http.dart' as http;
+import 'platform_client_factory.dart';
 import '../models/order_model.dart';
 
 class ApiService {
   static final String _baseUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:3000';
 
-  // Create a client that allows self-signed certificates (ideal for local HTTPS)
-  static http.Client get _client {
-    final ioc = HttpClient();
-    ioc.badCertificateCallback = (X509Certificate cert, String host, int port) => true;
-    return IOClient(ioc);
-  }
+  // Create a client that handles platform-specific requirements
+  static http.Client get _client => PlatformClient.getClient();
 
   static Future<List<OrderModel>> getLiveOrders(String shopId) async {
     try {

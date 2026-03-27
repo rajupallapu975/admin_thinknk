@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import '../../models/app_user.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -13,7 +13,7 @@ import '../../services/auth_service.dart';
 import '../../utils/app_colors.dart';
 
 class ProfileTab extends StatelessWidget {
-  final User user;
+  final AppUser user;
   final Map<String, dynamic>? shopData;
   final ScreenshotController screenshotController = ScreenshotController();
 
@@ -112,15 +112,13 @@ class ProfileTab extends StatelessWidget {
                   child: Column(
                     children: [
                       QrImageView(
-                        data: user.uid,
+                        data: 'thinkink-shop:${user.uid}',
                         version: QrVersions.auto,
                         size: 220.0,
                         backgroundColor: Colors.white,
                       ),
                       const SizedBox(height: 12),
                       Text(shopData?['shopName'] ?? "ThinkInk Shop", style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.textPrimary)),
-                      const SizedBox(height: 4),
-                      Text("Unique ID: ${user.uid}", style: GoogleFonts.manrope(fontSize: 10, color: AppColors.textTertiary, fontWeight: FontWeight.w700)),
                     ],
                   ),
                 ),
@@ -198,6 +196,9 @@ class ProfileTab extends StatelessWidget {
               radius: 54,
               backgroundColor: AppColors.primaryBlue.withValues(alpha: 0.1),
               backgroundImage: user.photoURL != null ? NetworkImage(user.photoURL!) : null,
+              onBackgroundImageError: user.photoURL != null ? (exception, stackTrace) {
+                debugPrint("Profile Image Error: $exception");
+              } : null,
               child: user.photoURL == null ? const Icon(Icons.person, size: 54, color: AppColors.primaryBlue) : null,
             ),
             const SizedBox(height: 16),
@@ -223,48 +224,18 @@ class ProfileTab extends StatelessWidget {
             
             const Divider(height: 60),
             
-            _buildProfileItem(Icons.fingerprint, 'Unique Shop ID', user.uid),
-            _buildProfileItem(Icons.phone, 'Mobile', shopData?['mobile'] ?? 'N/A'),
-            _buildProfileItem(Icons.login, 'Opens', shopData?['openingTime'] ?? 'N/A'),
-            _buildProfileItem(Icons.logout, 'Closes', shopData?['closingTime'] ?? 'N/A'),
-            _buildProfileItem(Icons.pin_drop, 'Pincode', shopData?['pincode'] ?? 'N/A'),
-            _buildProfileItem(Icons.location_on, 'Location', shopData?['address'] ?? 'N/A'),
+            _buildProfileItem(Icons.phone, 'Mobile', shopData?['mobile']?.toString() ?? 'N/A'),
+            _buildProfileItem(Icons.login, 'Opens', shopData?['openingTime']?.toString() ?? 'N/A'),
+            _buildProfileItem(Icons.logout, 'Closes', shopData?['closingTime']?.toString() ?? 'N/A'),
+            _buildProfileItem(Icons.pin_drop, 'Pincode', shopData?['pincode']?.toString() ?? 'N/A'),
+            _buildProfileItem(Icons.location_on, 'Location', shopData?['address']?.toString() ?? 'N/A'),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildActionItem(BuildContext context, IconData icon, String label, String sub, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.primaryBlue.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.primaryBlue.withValues(alpha: 0.1)),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, color: AppColors.primaryBlue, size: 24),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label, style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 15, color: AppColors.textPrimary)),
-                  Text(sub, style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textSecondary)),
-                ],
-              ),
-            ),
-            const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.textTertiary),
-          ],
-        ),
-      ),
-    );
-  }
+
 
   Widget _buildProfileItem(IconData icon, String label, String value) {
     return Container(

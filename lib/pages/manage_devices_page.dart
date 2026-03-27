@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import '../../models/app_user.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../utils/app_colors.dart';
 
 class ManageDevicesPage extends StatefulWidget {
-  final User user;
+  final AppUser user;
   const ManageDevicesPage({super.key, required this.user});
 
   @override

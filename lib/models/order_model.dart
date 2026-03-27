@@ -7,24 +7,20 @@ class OrderModel {
   final int bwPages;
   final int colorPages;
   final bool isDuplex;
-  final String status; // 'pending', 'printing', 'ready', 'completed'
-  final String paymentStatus; // 'done', 'pending', 'refunded'
+  final String orderStatus; 
+  final String paymentStatus; 
   final double amount;
   final DateTime timestamp;
   final String? fileUrl;
-  final String orderCode; // 4-digit code from customer app
-  final DateTime? printedAt;
+  final List<String> fileUrls;
+  final String orderCode; 
+  final int copies;
   final String? lastPrinterUsed;
-
-  bool get isImageFile {
-    final name = fileName.toLowerCase();
-    return name.endsWith('.jpg') || 
-           name.endsWith('.jpeg') || 
-           name.endsWith('.png') || 
-           name.endsWith('.webp') || 
-           name.endsWith('.gif');
-  }
-
+  final String orientation; 
+  final String? customerPhone;
+  final List<String> fileNames;
+  final List<Map<String, dynamic>> fileSettings;
+  
   OrderModel({
     required this.id,
     required this.customerName,
@@ -32,17 +28,88 @@ class OrderModel {
     required this.bwPages,
     required this.colorPages,
     required this.isDuplex,
-    required this.status,
+    required this.orderStatus,
     required this.paymentStatus,
     required this.amount,
     required this.timestamp,
     required this.orderCode,
+    this.fileNames = const [],
+    this.fileUrls = const [],
+    this.fileSettings = const [],
+    this.orientation = 'portrait',
+    this.copies = 1,
     this.fileUrl,
-    this.printedAt,
     this.lastPrinterUsed,
+    this.customerPhone,
   });
 
+  // 🛠️ RESTORED Helper methods from original code
+  bool getIsColor(int index) {
+    if (index < 0 || index >= fileSettings.length) return colorPages > 0;
+    final color = fileSettings[index]['color']?.toString().toUpperCase();
+    return color == 'COLOR';
+  }
+
+  bool getIsDuplex(int index) {
+    if (index < 0 || index >= fileSettings.length) return isDuplex;
+    return fileSettings[index]['doubleSided'] == true || fileSettings[index]['isDoubleSided'] == true;
+  }
+
+  String getOrientation(int index) {
+    if (index < 0 || index >= fileSettings.length) return orientation;
+    return fileSettings[index]['orientation']?.toString().toLowerCase() ?? orientation;
+  }
+
+  int getCopies(int index) {
+    if (index < 0 || index >= fileSettings.length) return copies;
+    return (fileSettings[index]['copies'] ?? copies) as int;
+  }
+
+  int getPageCount(int index) {
+    if (index >= 0 && index < fileSettings.length) {
+       return (fileSettings[index]['pageCount'] ?? 1) as int;
+    }
+    if (index >= 0 && index < fileNames.length) {
+       final name = fileNames[index].toLowerCase();
+       final isImg = name.endsWith('.jpg') || name.endsWith('.jpeg') || 
+                     name.endsWith('.png') || name.endsWith('.webp');
+       if (isImg) { return 1; }
+    }
+    if (fileUrls.length == 1) { return totalPages; }
+    return 1; 
+  }
+
+  int get totalPages => bwPages + colorPages;
+
   factory OrderModel.fromMap(Map<String, dynamic> data, String docId) {
+    List<String> urls = [];
+    if (data['fileUrls'] is List) urls = List<String>.from(data['fileUrls']);
+    else if (data['urls'] is List) urls = List<String>.from(data['urls']);
+    else if (data['imageUrls'] is List) urls = List<String>.from(data['imageUrls']);
+    
+    // Fallback for single URLs
+    String? singleUrl = data['fileUrl'] ?? data['url'] ?? data['imageUrl'];
+    if (urls.isEmpty && singleUrl != null) urls = [singleUrl];
+
+    List<Map<String, dynamic>> settingsList = [];
+    final printSettings = data['printSettings'];
+    if (printSettings is Map && printSettings['files'] is List) {
+      settingsList = (printSettings['files'] as List).cast<Map<String, dynamic>>();
+    }
+
+    // 🥇 Prioritize overall completion status for the Admin Tab to prevent "sticky" active items
+    final String rawStatus = (data['status']?.toString() ?? '').toLowerCase().trim();
+    final String rawOrderStatus = (data['orderStatus']?.toString() ?? '').toLowerCase().trim();
+    
+    String finalStatus = 'not printed yet';
+    if (rawStatus == 'completed' || rawStatus == 'order completed' || rawOrderStatus == 'order completed' || rawOrderStatus == 'completed') {
+       finalStatus = 'order completed';
+    } else if (rawOrderStatus.isNotEmpty) {
+       finalStatus = rawOrderStatus;
+    } else if (rawStatus.isNotEmpty) {
+       finalStatus = rawStatus;
+    }
+    
     return OrderModel(
       id: docId,
       customerName: data['customerName'] ?? 'Guest',
@@ -50,21 +117,18 @@ class OrderModel {
       bwPages: data['bwPages'] ?? 0,
       colorPages: data['colorPages'] ?? 0,
       isDuplex: data['isDuplex'] ?? false,
-      status: data['status'] ?? 'pending',
+      orderStatus: finalStatus,
       paymentStatus: data['paymentStatus'] ?? 'pending',
       amount: (data['amount'] ?? 0.0).toDouble(),
-      timestamp: data['timestamp'] is Timestamp 
-          ? (data['timestamp'] as Timestamp).toDate() 
-          : data['timestamp'] != null 
-              ? DateTime.parse(data['timestamp'].toString()) 
-              : DateTime.now(),
-      fileUrl: data['fileUrl'] ?? data['url'] ?? data['imageUrl'] ?? data['cloudinaryUrl'] ?? 
-              (data['fileUrls'] is List && (data['fileUrls'] as List).isNotEmpty ? data['fileUrls'][0] : null),
-      orderCode: data['orderCode']?.toString() ?? 
-                data['xeroxId']?.toString() ??
-                (docId.length >= 4 ? docId.substring(docId.length - 4).toUpperCase() : docId.toUpperCase()),
-      printedAt: data['printedAt'] is Timestamp ? (data['printedAt'] as Timestamp).toDate() : null,
-      lastPrinterUsed: data['lastPrinterUsed'],
+      orientation: data['orientation'] ?? 'portrait',
+      copies: data['numCopies'] ?? data['copies'] ?? 1,
+      fileUrls: urls,
+      fileNames: data['fileNames'] is List ? List<String>.from(data['fileNames']) : [],
+      fileSettings: settingsList,
+      customerPhone: data['customerPhone']?.toString(),
+      timestamp: data['timestamp'] is Timestamp ? (data['timestamp'] as Timestamp).toDate() : DateTime.now(),
+      fileUrl: data['fileUrl'] ?? (urls.isNotEmpty ? urls[0] : null),
+      orderCode: data['orderCode']?.toString() ?? docId,
     );
   }
 
@@ -73,24 +137,6 @@ class OrderModel {
   }
 
   factory OrderModel.fromJson(Map<String, dynamic> json) {
-    return OrderModel.fromMap(json, json['id']?.toString() ?? '');
+    return OrderModel.fromMap(json, json['id']?.toString() ?? json['orderId']?.toString() ?? '');
   }
-
-  Map<String, dynamic> toFirestore() {
-    return {
-      'customerName': customerName,
-      'fileName': fileName,
-      'bwPages': bwPages,
-      'colorPages': colorPages,
-      'isDuplex': isDuplex,
-      'status': status,
-      'paymentStatus': paymentStatus,
-      'amount': amount,
-      'timestamp': Timestamp.fromDate(timestamp),
-      'fileUrl': fileUrl,
-      'orderCode': orderCode,
-    };
-  }
-
-  int get totalPages => bwPages + colorPages;
 }

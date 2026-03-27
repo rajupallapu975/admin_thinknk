@@ -1,17 +1,22 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter/foundation.dart';
 
 class AuthService {
+  AuthService._internal();
+  static final AuthService _instance = AuthService._internal();
+  factory AuthService() => _instance;
+
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   
   // Web Client ID from your google-services.json (client_type 3)
-  static const String webClientId = "1071627103248-kicf8hvemv2tk1up7j9ib9da74k5v7bl.apps.googleusercontent.com";
+  static final String webClientId = dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? "1071627103248-kicf8hvemv2tk1up7j9ib9da74k5v7bl.apps.googleusercontent.com";
 
   final GoogleSignIn _googleSignIn = GoogleSignIn(
-    clientId: kIsWeb ? webClientId : null,
+    clientId: webClientId,
   );
 
   // Sign in with Google

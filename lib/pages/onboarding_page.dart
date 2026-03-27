@@ -3,8 +3,16 @@ import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import '../services/auth_service.dart';
 import '../auth_wrapper.dart';
-
-import 'package:flutter/foundation.dart'; // Added for kIsWeb
+import 'package:flutter/foundation.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:screenshot/screenshot.dart';
+import 'package:share_plus/share_plus.dart';
+import 'dart:io' show File;
+import 'package:path_provider/path_provider.dart';
+import 'package:gal/gal.dart';
+import '../utils/web_helpers/web_download.dart';
+import '../utils/app_colors.dart';
 
 class OnboardingPage extends StatefulWidget {
   const OnboardingPage({super.key});
@@ -25,6 +33,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
   TimeOfDay? _closingTime;
   bool _isLoadingLocation = false;
   bool _isSubmitting = false;
+  final ScreenshotController _screenshotController = ScreenshotController();
 
   Future<void> _selectTime(BuildContext context, bool isOpening) async {
     final TimeOfDay? picked = await showTimePicker(
@@ -120,11 +129,17 @@ class _OnboardingPageState extends State<OnboardingPage> {
         };
 
         await AuthService().saveShopDetails(details);
+        
         if (mounted) {
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (context) => const AuthWrapper()),
-            (route) => false,
-          );
+          final user = AuthService().currentUser;
+          if (user != null) {
+            _showQRSuccessDialog(user.uid, details['shopName'] as String);
+          } else {
+            Navigator.of(context).pushAndRemoveUntil(
+              MaterialPageRoute(builder: (context) => const AuthWrapper()),
+              (route) => false,
+            );
+          }
         }
       } catch (e) {
         if (mounted) {
@@ -307,5 +322,156 @@ class _OnboardingPageState extends State<OnboardingPage> {
         validator: (value) => value == null || value.isEmpty ? "$label is required" : null,
       ),
     );
+  }
+
+  void _showQRSuccessDialog(String shopId, String shopName) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => PopScope(
+        canPop: false,
+        child: Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.check_circle_rounded, color: Colors.green.shade600, size: 64),
+                const SizedBox(height: 16),
+                Text(
+                  "Registration Successful!",
+                  style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  "Here is your unique Shop QR Identity.\nCustomers can scan this to find your shop.",
+                  style: GoogleFonts.manrope(color: AppColors.textSecondary, fontSize: 13),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                
+                Screenshot(
+                  controller: _screenshotController,
+                  child: Container(
+                    color: Colors.white,
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      children: [
+                        QrImageView(
+                          data: 'thinkink-shop:$shopId',
+                          version: QrVersions.auto,
+                          size: 180.0,
+                          backgroundColor: Colors.white,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(shopName, style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16, color: AppColors.textPrimary)),
+                      ],
+                    ),
+                  ),
+                ),
+                
+                const SizedBox(height: 24),
+                
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _downloadQR(shopId),
+                        icon: const Icon(Icons.download_rounded, size: 20),
+                        label: const Text("Save"),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _shareQR(shopName),
+                        icon: const Icon(Icons.share_rounded, size: 20),
+                        label: const Text("Share"),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                
+                const SizedBox(height: 20),
+                
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(builder: (context) => const AuthWrapper()),
+                      (route) => false,
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.shade800,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(double.infinity, 50),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Text("CONTINUE TO DASHBOARD", style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _downloadQR(String shopId) async {
+    try {
+      final Uint8List? imageBytes = await _screenshotController.capture();
+      if (imageBytes == null) return;
+
+      if (kIsWeb) {
+        downloadBytes(imageBytes, "shop_qr_${shopId.substring(0, 5)}.png");
+        return;
+      }
+
+      final hasAccess = await Gal.hasAccess();
+      if (!hasAccess) {
+        final granted = await Gal.requestAccess();
+        if (!granted) return;
+      }
+
+      await Gal.putImageBytes(imageBytes, name: "shop_qr_${shopId.substring(0, 5)}");
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("QR Code saved to Gallery!"), backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      debugPrint("Save Error: $e");
+    }
+  }
+
+  Future<void> _shareQR(String shopName) async {
+    try {
+      final image = await _screenshotController.capture();
+      if (image != null) {
+        if (kIsWeb) {
+          _downloadQR("share");
+          return;
+        }
+
+        final directory = await getTemporaryDirectory();
+        final imageFile = await File('${directory.path}/shop_qr.png').create();
+        await imageFile.writeAsBytes(image);
+        
+        await Share.shareXFiles([XFile(imageFile.path)], text: 'Scan this to find my shop "$shopName" on ThinkInk!');
+      }
+    } catch (e) {
+      debugPrint("Error sharing QR: $e");
+    }
   }
 }
