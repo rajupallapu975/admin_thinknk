@@ -20,6 +20,7 @@ class OrderModel {
   final String? customerPhone;
   final List<String> fileNames;
   final List<Map<String, dynamic>> fileSettings;
+  final List<String> viewUrls;
   
   OrderModel({
     required this.id,
@@ -36,12 +37,16 @@ class OrderModel {
     this.fileNames = const [],
     this.fileUrls = const [],
     this.fileSettings = const [],
+    this.viewUrls = const [],
     this.orientation = 'portrait',
     this.copies = 1,
     this.fileUrl,
     this.lastPrinterUsed,
     this.customerPhone,
+    this.customId,
   });
+
+  final String? customId;
 
   // 🛠️ RESTORED Helper methods from original code
   bool getIsColor(int index) {
@@ -91,6 +96,10 @@ class OrderModel {
     String? singleUrl = data['fileUrl'] ?? data['url'] ?? data['imageUrl'];
     if (urls.isEmpty && singleUrl != null) urls = [singleUrl];
 
+    List<String> views = [];
+    if (data['viewUrls'] is List) views = List<String>.from(data['viewUrls']);
+    if (views.isEmpty && urls.isNotEmpty) views = urls; // Fallback to fileUrls if viewUrls missing
+
     List<Map<String, dynamic>> settingsList = [];
     final printSettings = data['printSettings'];
     if (printSettings is Map && printSettings['files'] is List) {
@@ -125,10 +134,12 @@ class OrderModel {
       fileUrls: urls,
       fileNames: data['fileNames'] is List ? List<String>.from(data['fileNames']) : [],
       fileSettings: settingsList,
+      viewUrls: views,
       customerPhone: data['customerPhone']?.toString(),
       timestamp: data['timestamp'] is Timestamp ? (data['timestamp'] as Timestamp).toDate() : DateTime.now(),
       fileUrl: data['fileUrl'] ?? (urls.isNotEmpty ? urls[0] : null),
       orderCode: data['orderCode']?.toString() ?? docId,
+      customId: data['customId']?.toString(),
     );
   }
 

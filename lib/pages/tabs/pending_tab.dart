@@ -1,4 +1,8 @@
+import 'dart:convert';
+
+import 'package:admin_thinkink/utils/web_downloader.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../../models/app_user.dart';
@@ -89,76 +93,46 @@ class _PendingTabState extends State<PendingTab> {
   }
 
   Future<void> _finalizeBatch(String mainId, List<OrderModel> items) async {
-    final shopRef = _firestore.collection('shops').doc(widget.user.uid);
+    final String? backendUrl = dotenv.env['BACKEND_URL'];
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
     try {
-      debugPrint("🚀 Finalizing Batch #$mainId (${items.length} items)...");
+      debugPrint("🚀 Finalizing Batch #$mainId via Backend (${items.length} items)...");
 
-      await _firestore.runTransaction((transaction) async {
-        final shopDoc = await transaction.get(shopRef);
-        if (!shopDoc.exists) throw "Shop profile not found";
+      // We process each order through the backend to ensure Wallet/Stats/Cleanup are triggered
+      bool allSuccessful = true;
+      for (var order in items) {
+        try {
+          final response = await http.post(
+            Uri.parse('$backendUrl/mark-delivered'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'orderId': order.id,
+              'shopId': widget.user.uid,
+            }),
+          ).timeout(const Duration(seconds: 10));
 
-        final currentBalance = (shopDoc.data()?['walletBalance'] ?? 0.0).toDouble();
-        final currentBw = shopDoc.data()?['totalBwPages'] ?? 0;
-        final currentColor = shopDoc.data()?['totalColorPages'] ?? 0;
-
-        double batchAmount = 0.0;
-        int batchBw = 0;
-        int batchColor = 0;
-
-        for (var order in items) {
-          batchAmount += order.amount;
-          batchBw += (order.bwPages).toInt();
-          batchColor += (order.colorPages).toInt();
-
-          // 1. Update Shop mirror (ADMIN)
-          transaction.update(shopRef.collection('orders').doc(order.id), {
-            'orderStatus': 'completed',
-            'status': 'completed',
-            'finalizedAt': FieldValue.serverTimestamp(),
-          });
-
-          // 2. Cascade Sync to PSFC (CUSTOMER)
-          final psfcApp = Firebase.app('psfc');
-          final psfcFirestore = FirebaseFirestore.instanceFor(app: psfcApp);
-
-          // We check multiple potential collections in PSFC
-          final cols = ['xerox_orders', 'orders', 'xerox_shop_orders'];
-          for (var col in cols) {
-             final ref = psfcFirestore.collection(col).doc(order.id);
-             transaction.update(ref, {
-               'orderStatus': 'order completed',
-               'status': 'completed',
-               'isPicked': true,
-               'orderDone': true,
-               'completedAt': FieldValue.serverTimestamp(),
-             });
+          if (response.statusCode != 200) {
+            allSuccessful = false;
+            debugPrint("❌ Backend Finalize FAILED for ${order.id}: ${response.body}");
           }
+        } catch (e) {
+          allSuccessful = false;
+          debugPrint("❌ Backend Finalize ERROR for ${order.id}: $e");
         }
-
-        // 3. Update Shop Stats & Wallet
-        transaction.update(shopRef, {
-          'walletBalance': currentBalance + batchAmount,
-          'totalBwPages': currentBw + batchBw,
-          'totalColorPages': currentColor + batchColor,
-        });
-
-        // 4. Record Transaction
-        transaction.set(shopRef.collection('transactions').doc(), {
-          'amount': batchAmount,
-          'title': "Delivery: Ticket #$mainId",
-          'timestamp': FieldValue.serverTimestamp(),
-          'type': 'credit',
-          'orderId': items.first.id,
-        });
-      });
+      }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Delivered & Wallet Updated! 🎉"), backgroundColor: AppColors.success));
+        if (allSuccessful) {
+          scaffoldMessenger.showSnackBar(const SnackBar(content: Text("Delivered & Wallet Updated! 🎉"), backgroundColor: AppColors.success));
+        } else {
+          scaffoldMessenger.showSnackBar(const SnackBar(content: Text("Warning: Some orders failed to sync with backend."), backgroundColor: Colors.orange));
+        }
       }
     } catch (e) {
       debugPrint("❌ Finalize Error: $e");
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: AppColors.error));
+        scaffoldMessenger.showSnackBar(SnackBar(content: Text("Critical Error: $e"), backgroundColor: AppColors.error));
       }
     }
   }
@@ -270,7 +244,7 @@ class _PendingTabState extends State<PendingTab> {
           ),
         ),
         const SizedBox(width: 12),
-        Expanded(child: Divider(color: color.withValues(alpha: 0.2), thickness: 1)),
+        Expanded(child: Divider(color: color.withOpacity(0.2), thickness: 1)),
       ],
     );
   }
@@ -281,7 +255,7 @@ class _PendingTabState extends State<PendingTab> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           SizedBox(height: MediaQuery.of(context).size.height * 0.2),
-          Icon(Icons.hourglass_empty_rounded, size: 80, color: AppColors.textTertiary.withValues(alpha: 0.2)),
+          Icon(Icons.hourglass_empty_rounded, size: 80, color: AppColors.textTertiary.withOpacity(0.2)),
           const SizedBox(height: 24),
           Text(
             "No active pending deliveries",
@@ -318,9 +292,9 @@ class _PendingTabState extends State<PendingTab> {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: cardColor.withValues(alpha: 0.05),
+        color: cardColor.withOpacity(0.05),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: cardColor.withValues(alpha: 0.5), width: 1.5),
+        border: Border.all(color: cardColor.withOpacity(0.5), width: 1.5),
         boxShadow: AppColors.softShadow,
       ),
       child: Theme(
@@ -356,7 +330,7 @@ class _PendingTabState extends State<PendingTab> {
           ),
           subtitle: Row(
             children: [
-              Text("$totalFiles File${totalFiles > 1 ? 's' : ''}", style: GoogleFonts.manrope(fontSize: 11, fontWeight: FontWeight.bold, color: cardColor.withValues(alpha: 0.8))),
+              Text("$totalFiles File${totalFiles > 1 ? 's' : ''}", style: GoogleFonts.manrope(fontSize: 11, fontWeight: FontWeight.bold, color: cardColor.withOpacity(0.8))),
               const SizedBox(width: 8),
               Text("• ₹${totalAmount.toInt()}", style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w900, color: cardColor)),
               if (isCompleted) ...[
@@ -364,9 +338,9 @@ class _PendingTabState extends State<PendingTab> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.grey.withValues(alpha: 0.1),
+                    color: Colors.grey.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
+                    border: Border.all(color: Colors.grey.withOpacity(0.3)),
                   ),
                   child: Row(
                     children: [
@@ -435,7 +409,7 @@ class _PendingTabState extends State<PendingTab> {
       decoration: BoxDecoration(
         color: AppColors.background,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border.withValues(alpha: 0.5)),
+        border: Border.all(color: AppColors.border.withOpacity(0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -445,7 +419,7 @@ class _PendingTabState extends State<PendingTab> {
                Container(
                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                  decoration: BoxDecoration(
-                   color: (isCompleted ? Colors.grey : AppColors.error).withValues(alpha: 0.1),
+                   color: (isCompleted ? Colors.grey : AppColors.error).withOpacity(0.1),
                    borderRadius: BorderRadius.circular(6),
                  ),
                  child: Text("#$mainId-$subIdx", style: GoogleFonts.inter(fontSize: isSmallScreen ? 9 : 10, fontWeight: FontWeight.w900, color: isCompleted ? Colors.grey : AppColors.error)),
@@ -453,7 +427,7 @@ class _PendingTabState extends State<PendingTab> {
                const Spacer(),
                Container(
                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                 decoration: BoxDecoration(color: (isCompleted ? Colors.grey : Colors.green).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
+                 decoration: BoxDecoration(color: (isCompleted ? Colors.grey : Colors.green).withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
                  child: Text(isCompleted ? "COMPLETED" : "PRINTED", style: TextStyle(color: isCompleted ? Colors.grey : Colors.green, fontSize: 10, fontWeight: FontWeight.bold)),
                )
             ],
@@ -490,7 +464,7 @@ class _PendingTabState extends State<PendingTab> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                 decoration: BoxDecoration(
-                  color: AppColors.background, border: Border.all(color: AppColors.border.withValues(alpha: 0.4)), borderRadius: BorderRadius.circular(4)
+                  color: AppColors.background, border: Border.all(color: AppColors.border.withOpacity(0.4)), borderRadius: BorderRadius.circular(4)
                 ),
                 child: Text(
                   "${order.getPageCount(fileIdx)} ${order.getPageCount(fileIdx) == 1 ? 'PAGE' : 'PAGES'}", 
@@ -500,7 +474,7 @@ class _PendingTabState extends State<PendingTab> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                 decoration: BoxDecoration(
-                  color: AppColors.background, border: Border.all(color: AppColors.border.withValues(alpha: 0.4)), borderRadius: BorderRadius.circular(4)
+                  color: AppColors.background, border: Border.all(color: AppColors.border.withOpacity(0.4)), borderRadius: BorderRadius.circular(4)
                 ),
                 child: Text(
                   "${order.getCopies(fileIdx)} COPY", 
@@ -512,14 +486,19 @@ class _PendingTabState extends State<PendingTab> {
           const SizedBox(height: 12),
           Row(
             children: [
+             
               Expanded(
                 child: InkWell(
-                  onTap: () {
-                    if (fileUrl == null) return;
-                    if (fileName.toLowerCase().endsWith('.pdf')) {
-                       launchUrl(Uri.parse(fileUrl), mode: LaunchMode.externalApplication);
-                    } else {
-                       Navigator.push(context, MaterialPageRoute(builder: (_) => ImageViewerPage(imageUrl: fileUrl, fileName: fileName)));
+                  onTap: () async {
+                    final url = (order.viewUrls.length > fileIdx ? order.viewUrls[fileIdx] : order.fileUrls[fileIdx]) ?? "";
+                    if (url.isNotEmpty) {
+                      try {
+                         await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                      } catch (e) {
+                         if (context.mounted) {
+                           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open preview: $e')));
+                         }
+                      }
                     }
                   },
                   child: Container(
@@ -538,33 +517,38 @@ class _PendingTabState extends State<PendingTab> {
                 child: InkWell(
                   onTap: () async {
                     if (fileUrl == null) return;
-                    String dlUrl = fileUrl;
-                    
-                    // 📥 FORCE DOWNLOAD FOR CLOUDINARY WITH ORIGINAL FILENAME
-                    if (dlUrl.contains('cloudinary.com') && dlUrl.contains('/upload/')) {
-                       final safeName = Uri.encodeComponent(fileName.split('.').first.replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '_'));
-                       dlUrl = dlUrl.replaceFirst('/upload/', '/upload/fl_attachment:$safeName/');
+                    try {
+                      final extension = fileName.contains('.') ? fileName.split('.').last : (fileUrl.split('.').last);
+                      final downloadName = "${mainId}_$subIdx.$extension";
+                      
+                      if (kIsWeb) {
+                        await WebDownloader.downloadFile(fileUrl, downloadName);
+                      } else {
+                        await launchUrl(Uri.parse(fileUrl), mode: LaunchMode.externalApplication);
+                      }
+                    } catch (e) {
+                      debugPrint('Direct download failed: $e');
+                      try {
+                        await launchUrl(Uri.parse(fileUrl), mode: LaunchMode.externalApplication);
+                      } catch (err) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Download failed: $err')));
+                        }
+                      }
                     }
-
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content: Text("Downloading securely in the background... check notifications."),
-                      backgroundColor: Colors.green,
-                      duration: Duration(seconds: 3),
-                    ));
-
-                    await launchUrl(Uri.parse(dlUrl), mode: LaunchMode.externalApplication);
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     decoration: BoxDecoration(
-                      color: AppColors.primaryBlue.withValues(alpha: 0.1),
+                      color: AppColors.primaryBlue.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.primaryBlue.withValues(alpha: 0.3)),
+                      border: Border.all(color: AppColors.primaryBlue.withOpacity(0.3)),
                     ),
                     child: const Icon(Icons.download_rounded, size: 20, color: AppColors.primaryBlue),
                   ),
                 ),
               ),
+
             ],
           ),
         ],
@@ -578,7 +562,7 @@ class _PendingTabState extends State<PendingTab> {
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
       decoration: BoxDecoration(
         color: AppColors.background,
-        border: Border.all(color: AppColors.border.withValues(alpha: 0.4)),
+        border: Border.all(color: AppColors.border.withOpacity(0.4)),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Row(

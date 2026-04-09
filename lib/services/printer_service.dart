@@ -1,6 +1,6 @@
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -42,6 +42,15 @@ class PrinterService extends ChangeNotifier {
   String get jobStatusMessage => _jobStatusMessage;
   JobState get currentJobState => _currentJobState;
   String? get activeOrderId => _activeOrderId;
+
+  void resetJobState() {
+    _isJobActive = false;
+    _activeOrderId = null;
+    _currentJobState = JobState.idle;
+    _jobProgress = 0.0;
+    _jobStatusMessage = "";
+    notifyListeners();
+  }
 
   Future<void> connectPrinter(Object nameOrPrinter, String shopId) async {
     String name;
@@ -342,14 +351,68 @@ class PrinterService extends ChangeNotifier {
       try {
         await orderRef.update({'status': 'pending'});
       } catch (_) {}
-      
-      await Future.delayed(const Duration(seconds: 5));
     } finally {
-      _isJobActive = false;
-      _activeOrderId = null;
-      _currentJobState = JobState.idle;
-      _jobProgress = 0.0;
-      _jobStatusMessage = "";
+      // We DON'T auto-reset here anymore so the user can see the final status and click "DISMISS"
+      // unless we want to auto-close after a long delay, but manual DISMISS is better for errors.
+      if (_currentJobState != JobState.completed && _currentJobState != JobState.error) {
+         resetJobState();
+      }
+    }
+  }
+
+  /// 🖨️ SINGLE FILE QUICK PRINT
+  Future<void> printSingleFile(String fileUrl, String fileName, BuildContext context) async {
+    _isJobActive = true;
+    _currentJobState = JobState.queued;
+    _jobStatusMessage = "Preparing $fileName...";
+    _activeOrderId = "single_file";
+    notifyListeners();
+
+    try {
+      _jobStatusMessage = "Downloading...";
+      _jobProgress = 0.3;
+      notifyListeners();
+
+      final response = await http.get(Uri.parse(fileUrl)).timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) throw "DOWNLOAD_FAILED";
+      
+      final Uint8List fileBytes = response.bodyBytes;
+      final bool isPDF = fileUrl.toLowerCase().contains('.pdf') || fileName.toLowerCase().endsWith('.pdf');
+
+      Future<Uint8List> buildPdf(PdfPageFormat format) async {
+        if (isPDF) return fileBytes;
+        final pdf = pw.Document();
+        final image = pw.MemoryImage(fileBytes);
+        pdf.addPage(pw.Page(
+          pageFormat: format,
+          build: (context) => pw.Center(child: pw.Image(image, fit: pw.BoxFit.contain)),
+        ));
+        return await pdf.save();
+      }
+
+      _currentJobState = JobState.printing;
+      _jobStatusMessage = "Relaying to Spooler...";
+      _jobProgress = 0.7;
+      notifyListeners();
+
+      final bool success = await Printing.layoutPdf(
+        onLayout: buildPdf,
+        name: fileName,
+        usePrinterSettings: true,
+      );
+
+      if (success) {
+        _currentJobState = JobState.completed;
+        _jobProgress = 1.0;
+        _jobStatusMessage = "Document Sent Successfully";
+      } else {
+        _currentJobState = JobState.idle;
+        _isJobActive = false;
+      }
+    } catch (e) {
+      _currentJobState = JobState.error;
+      _jobStatusMessage = "Print Error: $e";
+    } finally {
       notifyListeners();
     }
   }

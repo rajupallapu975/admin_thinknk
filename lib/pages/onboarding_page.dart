@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import '../services/auth_service.dart';
@@ -22,7 +23,9 @@ class OnboardingPage extends StatefulWidget {
 }
 
 class _OnboardingPageState extends State<OnboardingPage> {
-  final _formKey = GlobalKey<FormState>();
+  final PageController _pageController = PageController();
+  int _currentStep = 0;
+  final int _totalSteps = 5;
 
   final TextEditingController _shopNameController = TextEditingController();
   final TextEditingController _mobileController = TextEditingController();
@@ -35,10 +38,40 @@ class _OnboardingPageState extends State<OnboardingPage> {
   bool _isSubmitting = false;
   final ScreenshotController _screenshotController = ScreenshotController();
 
+  @override
+  void dispose() {
+    _pageController.dispose();
+    _shopNameController.dispose();
+    _mobileController.dispose();
+    _pincodeController.dispose();
+    _locationController.dispose();
+    super.dispose();
+  }
+
+  void _nextStep() {
+    if (_currentStep < _totalSteps - 1) {
+      _pageController.nextPage(
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOutQuart,
+      );
+    } else {
+      _submit();
+    }
+  }
+
+  void _prevStep() {
+    if (_currentStep > 0) {
+      _pageController.previousPage(
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOutQuart,
+      );
+    }
+  }
+
   Future<void> _selectTime(BuildContext context, bool isOpening) async {
     final TimeOfDay? picked = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay.now(),
+      initialTime: isOpening ? const TimeOfDay(hour: 9, minute: 0) : const TimeOfDay(hour: 21, minute: 0),
     );
     if (picked != null) {
       setState(() {
@@ -75,7 +108,6 @@ class _OnboardingPageState extends State<OnboardingPage> {
         desiredAccuracy: LocationAccuracy.high,
       );
       
-      // Geocoding package is NOT compatible with Web
       if (!kIsWeb) {
         List<Placemark> placemarks = await placemarkFromCoordinates(
           position.latitude,
@@ -108,160 +140,89 @@ class _OnboardingPageState extends State<OnboardingPage> {
   }
 
   void _submit() async {
-    if (_formKey.currentState!.validate()) {
-      if (_openingTime == null || _closingTime == null) {
+    if (_shopNameController.text.isEmpty || _mobileController.text.isEmpty || _pincodeController.text.isEmpty || _locationController.text.isEmpty || _openingTime == null || _closingTime == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please ensure all details are filled correctly.")),
+      );
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+    try {
+      final rawMobile = _mobileController.text.trim();
+      final formattedMobile = rawMobile.startsWith('+') ? rawMobile : '+91 $rawMobile';
+
+      final details = {
+        'shopName': _shopNameController.text.trim(),
+        'openingTime': _openingTime!.format(context),
+        'closingTime': _closingTime!.format(context),
+        'mobile': formattedMobile,
+        'pincode': _pincodeController.text.trim(),
+        'address': _locationController.text.trim(),
+        'email': AuthService().currentUser?.email,
+        'activePrinters': 1,
+        'isCurrentlyOpen': true,
+        'pricePerBWPage': 3.0,
+        'pricePerColorPage': 10.0,
+      };
+
+      await AuthService().saveShopDetails(details);
+      
+      if (mounted) {
+        final user = AuthService().currentUser;
+        if (user != null) {
+          _showQRSuccessDialog(user.uid, details['shopName'] as String);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Please select both opening and closing times")),
+          SnackBar(content: Text("Submit Error: $e"), backgroundColor: Colors.red),
         );
-        return;
       }
-
-      setState(() => _isSubmitting = true);
-      try {
-        final details = {
-          'shopName': _shopNameController.text,
-          'openingTime': _openingTime!.format(context),
-          'closingTime': _closingTime!.format(context),
-          'mobile': _mobileController.text,
-          'pincode': _pincodeController.text,
-          'address': _locationController.text,
-          'email': AuthService().currentUser?.email,
-        };
-
-        await AuthService().saveShopDetails(details);
-        
-        if (mounted) {
-          final user = AuthService().currentUser;
-          if (user != null) {
-            _showQRSuccessDialog(user.uid, details['shopName'] as String);
-          } else {
-            Navigator.of(context).pushAndRemoveUntil(
-              MaterialPageRoute(builder: (context) => const AuthWrapper()),
-              (route) => false,
-            );
-          }
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Submit Error: $e"), backgroundColor: Colors.red),
-          );
-        }
-      } finally {
-        if (mounted) setState(() => _isSubmitting = false);
-      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    // 🧱 PREVENT ENGINE ASSERTION: Wait until physical size is ready (Web fix)
+    if (View.of(context).physicalSize.width <= 0) return const SizedBox.shrink();
+
     return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Colors.blue.shade900, Colors.blue.shade600],
-          ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
-              child: Card(
-                elevation: 12,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.shade50,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(Icons.store_mall_directory_rounded, size: 50, color: Colors.blue.shade800),
-                        ),
-                        const SizedBox(height: 20),
-                        Text(
-                          "Shop Registration",
-                          style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.blue.shade900),
-                        ),
-                        const SizedBox(height: 8),
-                        Text("Fill in your details to get started", style: TextStyle(color: Colors.grey.shade600)),
-                        const SizedBox(height: 32),
-                        
-                        _buildTextField(_shopNameController, "Xerox Shop Name", Icons.storefront),
-                        
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _buildTimePickerField(
-                                _openingTime?.format(context) ?? "Opening Time",
-                                Icons.login,
-                                () => _selectTime(context, true),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _buildTimePickerField(
-                                _closingTime?.format(context) ?? "Closing Time",
-                                Icons.logout,
-                                () => _selectTime(context, false),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        
-                        _buildTextField(_mobileController, "Mobile Number", Icons.phone_android_rounded, keyboardType: TextInputType.phone),
-                        _buildTextField(_pincodeController, "Pincode", Icons.pin_drop_rounded, keyboardType: TextInputType.number),
-                        
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _buildTextField(_locationController, "Shop Full Address", Icons.location_on_rounded, maxLines: 2),
-                            ),
-                            const SizedBox(width: 8),
-                            InkWell(
-                              onTap: _isLoadingLocation ? null : _getCurrentLocation,
-                              child: Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.blue.shade800,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: _isLoadingLocation 
-                                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                                  : const Icon(Icons.my_location, color: Colors.white),
-                              ),
-                            ),
-                          ],
-                        ),
-                        
-                        const SizedBox(height: 32),
-                        ElevatedButton(
-                          onPressed: _isSubmitting ? null : _submit,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue.shade800,
-                            foregroundColor: Colors.white,
-                            minimumSize: const Size(double.infinity, 56),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                            elevation: 4,
-                          ),
-                          child: _isSubmitting 
-                            ? const CircularProgressIndicator(color: Colors.white)
-                            : const Text("Create Captain Profile", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                        ),
-                      ],
-                    ),
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 600),
+            child: Column(
+              children: [
+                // Progress Indicator
+                LinearProgressIndicator(
+                  value: _totalSteps > 0 ? (_currentStep + 1) / _totalSteps : 0,
+                  backgroundColor: AppColors.border,
+                  color: AppColors.primaryBlue,
+                  minHeight: 6,
+                ),
+                
+                Expanded(
+                  child: PageView(
+                    controller: _pageController,
+                    physics: const NeverScrollableScrollPhysics(),
+                    onPageChanged: (idx) => setState(() => _currentStep = idx),
+                    children: [
+                      _buildIntroStep(),
+                      _buildShopNameStep(),
+                      _buildTimingsStep(),
+                      _buildContactStep(),
+                      _buildLocationStep(),
+                    ],
                   ),
                 ),
-              ),
+                
+                _buildNavigationButtons(),
+              ],
             ),
           ),
         ),
@@ -269,58 +230,262 @@ class _OnboardingPageState extends State<OnboardingPage> {
     );
   }
 
-  Widget _buildTimePickerField(String text, IconData icon, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-        decoration: BoxDecoration(
-          color: Colors.grey.shade50,
-          border: Border.all(color: Colors.grey.shade400),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 20, color: Colors.blue.shade700),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                text, 
-                style: TextStyle(color: text.contains("Time") ? Colors.grey.shade600 : Colors.black87),
-                overflow: TextOverflow.ellipsis,
-              ),
+  Widget _buildStepContainer({required IconData icon, required String title, required String description, required Widget child}) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 40),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.primaryBlue.withOpacity(0.1),
+              shape: BoxShape.circle,
             ),
+            child: Icon(icon, size: 40, color: AppColors.primaryBlue),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            title,
+            style: GoogleFonts.inter(fontSize: 28, fontWeight: FontWeight.w900, color: AppColors.textPrimary, letterSpacing: -1),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            description,
+            style: GoogleFonts.manrope(fontSize: 16, color: AppColors.textSecondary, height: 1.5, fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(height: 48),
+          child, // 🔥 Removed .animate() for Web compatibility fix
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIntroStep() {
+    return _buildStepContainer(
+      icon: Icons.rocket_launch_rounded,
+      title: "Welcome to ThinkInk",
+      description: "Let's set up your shop profile so customers can start finding you. This will take less than 2 minutes.",
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: AppColors.primaryBlue.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppColors.primaryBlue.withOpacity(0.1)),
+        ),
+        child: Column(
+          children: [
+            _infoRow(Icons.check_circle_outline, "Customers will see your shop name"),
+            const SizedBox(height: 12),
+            _infoRow(Icons.check_circle_outline, "Your location helps nearby users find you"),
+            const SizedBox(height: 12),
+            _infoRow(Icons.check_circle_outline, "Business hours help users visit at the right time"),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildTextField(
-    TextEditingController controller, 
-    String label, 
-    IconData icon, 
-    {TextInputType keyboardType = TextInputType.text, int maxLines = 1}
-  ) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+
+  Widget _buildShopNameStep() {
+    return _buildStepContainer(
+      icon: Icons.storefront_rounded,
+      title: "What's your shop's name?",
+      description: "Choose a name that customers recognize easily. This is the face of your business on ThinkInk.",
+      child: _buildTextField(
+        _shopNameController,
+        "Shop Name (e.g., Sri Krishna Xerox)",
+        Icons.edit_note_rounded,
+        autofocus: true,
+      ),
+    );
+  }
+
+  Widget _buildTimingsStep() {
+    return _buildStepContainer(
+      icon: Icons.access_time_filled_rounded,
+      title: "Business Hours",
+      description: "When do you start and end your services? This helps avoid customers arriving when you're closed.",
+      child: Column(
+        children: [
+          _buildTimeSelector("Opening Time", _openingTime, true),
+          const SizedBox(height: 16),
+          _buildTimeSelector("Closing Time", _closingTime, false),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildContactStep() {
+    return _buildStepContainer(
+      icon: Icons.phone_callback_rounded,
+      title: "Contact Details",
+      description: "We'll use this mobile number for order notifications and for customers to reach you easily.",
+      child: _buildTextField(
+        _mobileController,
+        "Mobile Number",
+        Icons.phone_iphone_rounded,
+        keyboardType: TextInputType.phone,
+        autofocus: true,
+        prefixText: "+91",
+      ),
+    );
+  }
+
+  Widget _buildLocationStep() {
+    return _buildStepContainer(
+      icon: Icons.location_on_rounded,
+      title: "Shop Location",
+      description: "This is crucial for local discoverability. We'll show your shop to users searching within your area.",
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _buildTextField(
+                  _locationController,
+                  "Full Address",
+                  Icons.map_rounded,
+                  maxLines: 2,
+                ),
+              ),
+              const SizedBox(width: 8),
+              _buildLocationFetcher(),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _buildTextField(
+            _pincodeController,
+            "Pincode",
+            Icons.pin_drop_rounded,
+            keyboardType: TextInputType.number,
+          ),
+        ],
+      ),
+    );
+  }
+  Widget _buildTimeSelector(String label, TimeOfDay? time, bool isOpening) {
+    return InkWell(
+      onTap: () => _selectTime(context, isOpening),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: time != null ? AppColors.primaryBlue : AppColors.border),
+          boxShadow: AppColors.softShadow,
+        ),
+        child: Row(
+          children: [
+            Icon(isOpening ? Icons.wb_sunny_rounded : Icons.nights_stay_rounded, color: time != null ? AppColors.primaryBlue : AppColors.textTertiary),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                time?.format(context) ?? label,
+                style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: time != null ? AppColors.textPrimary : AppColors.textTertiary),
+              ),
+            ),
+            Icon(Icons.arrow_forward_ios_rounded, size: 16, color: AppColors.textTertiary),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTextField(TextEditingController controller, String hint, IconData icon, {TextInputType? keyboardType, int maxLines = 1, bool autofocus = false, String? prefixText}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: AppColors.softShadow,
+      ),
       child: TextFormField(
         controller: controller,
         keyboardType: keyboardType,
         maxLines: maxLines,
+        autofocus: autofocus,
+        style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 16),
         decoration: InputDecoration(
-          labelText: label,
-          prefixIcon: Icon(icon, color: Colors.blue.shade700),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-          filled: true,
-          fillColor: Colors.grey.shade50,
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.grey.shade400),
+          hintText: hint,
+          prefixText: prefixText != null ? '$prefixText ' : null,
+          prefixStyle: prefixText != null ? GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.textPrimary) : null,
+          hintStyle: GoogleFonts.manrope(color: AppColors.textTertiary, fontWeight: FontWeight.w500),
+          prefixIcon: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Icon(icon, color: AppColors.primaryBlue),
           ),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+          contentPadding: const EdgeInsets.symmetric(vertical: 20),
         ),
-        validator: (value) => value == null || value.isEmpty ? "$label is required" : null,
       ),
+    );
+  }
+
+  Widget _buildLocationFetcher() {
+    return InkWell(
+      onTap: _isLoadingLocation ? null : _getCurrentLocation,
+      child: Container(
+        width: 56,
+        height: 56,
+        decoration: BoxDecoration(
+          color: AppColors.primaryBlue,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: AppColors.softShadow,
+        ),
+        child: _isLoadingLocation 
+          ? const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)))
+          : const Icon(Icons.my_location_rounded, color: Colors.white),
+      ),
+    );
+  }
+
+  Widget _buildNavigationButtons() {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Row(
+        children: [
+          if (_currentStep > 0)
+            Expanded(
+              flex: 1,
+              child: TextButton(
+                onPressed: _prevStep,
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                ),
+                child: Text("BACK", style: GoogleFonts.inter(fontWeight: FontWeight.w800, color: AppColors.textTertiary, letterSpacing: 1)),
+              ),
+            ),
+          if (_currentStep > 0) const SizedBox(width: 16),
+          Expanded(
+            flex: 2,
+            child: ElevatedButton(
+              onPressed: _isSubmitting ? null : _nextStep,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primaryBlue,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 20),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                elevation: 0,
+              ),
+              child: _isSubmitting 
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                : Text(_currentStep == _totalSteps - 1 ? "FINISH SETUP" : "CONTINUE", style: GoogleFonts.inter(fontWeight: FontWeight.w900, letterSpacing: 1)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoRow(IconData icon, String text) {
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: AppColors.primaryBlue),
+        const SizedBox(width: 12),
+        Expanded(child: Text(text, style: GoogleFonts.manrope(fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
+      ],
     );
   }
 
@@ -331,26 +496,30 @@ class _OnboardingPageState extends State<OnboardingPage> {
       builder: (context) => PopScope(
         canPop: false,
         child: Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
           child: Padding(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(32),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.check_circle_rounded, color: Colors.green.shade600, size: 64),
-                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(color: AppColors.success.withValues(alpha: 0.1), shape: BoxShape.circle),
+                  child: const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 48),
+                ),
+                const SizedBox(height: 24),
                 Text(
                   "Registration Successful!",
-                  style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                  style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w900, color: AppColors.textPrimary, letterSpacing: -0.5),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
                 Text(
                   "Here is your unique Shop QR Identity.\nCustomers can scan this to find your shop.",
-                  style: GoogleFonts.manrope(color: AppColors.textSecondary, fontSize: 13),
+                  style: GoogleFonts.manrope(color: AppColors.textSecondary, fontSize: 14, height: 1.5),
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 32),
                 
                 Screenshot(
                   controller: _screenshotController,
@@ -366,13 +535,13 @@ class _OnboardingPageState extends State<OnboardingPage> {
                           backgroundColor: Colors.white,
                         ),
                         const SizedBox(height: 12),
-                        Text(shopName, style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16, color: AppColors.textPrimary)),
+                        Text(shopName, style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 16, color: AppColors.textPrimary)),
                       ],
                     ),
                   ),
                 ),
                 
-                const SizedBox(height: 24),
+                const SizedBox(height: 32),
                 
                 Row(
                   children: [
@@ -383,7 +552,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
                         label: const Text("Save"),
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                         ),
                       ),
                     ),
@@ -391,18 +560,18 @@ class _OnboardingPageState extends State<OnboardingPage> {
                     Expanded(
                       child: OutlinedButton.icon(
                         onPressed: () => _shareQR(shopName),
-                        icon: const Icon(Icons.share_rounded, size: 20),
+                        icon: const Icon(Icons.share_rounded, size: 18),
                         label: const Text("Share"),
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                         ),
                       ),
                     ),
                   ],
                 ),
                 
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
                 
                 ElevatedButton(
                   onPressed: () {
@@ -412,12 +581,13 @@ class _OnboardingPageState extends State<OnboardingPage> {
                     );
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue.shade800,
+                    backgroundColor: AppColors.primaryBlue,
                     foregroundColor: Colors.white,
-                    minimumSize: const Size(double.infinity, 50),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    minimumSize: const Size(double.infinity, 56),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    elevation: 0,
                   ),
-                  child: const Text("CONTINUE TO DASHBOARD", style: TextStyle(fontWeight: FontWeight.bold)),
+                  child: Text("CONTINUE TO DASHBOARD", style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 1)),
                 ),
               ],
             ),

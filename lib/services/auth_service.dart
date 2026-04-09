@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter/foundation.dart';
@@ -53,11 +54,28 @@ class AuthService {
     final user = _auth.currentUser;
     if (user == null) return;
     
+    // 1. Save to primary Admin project (shops collection)
     await _db.collection('shops').doc(user.uid).set({
       ...details,
       'uid': user.uid,
       'createdAt': FieldValue.serverTimestamp(),
     });
+
+    // 2. Sync to secondary Customer project (users collection) - "Before Users" storage
+    try {
+      final psfcApp = Firebase.app('psfc');
+      final psfcFirestore = FirebaseFirestore.instanceFor(app: psfcApp);
+      
+      await psfcFirestore.collection('users').doc(user.uid).set({
+        ...details,
+        'uid': user.uid,
+        'role': 'shop_admin', // Identify as shop owner
+        'lastSyncAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      debugPrint("✅ Admin profile dual-synced to PSFC users collection");
+    } catch (e) {
+      debugPrint("⚠️ Dual-sync to PSFC failed (secondary app might not be initialized): $e");
+    }
   }
 
   // Sign out

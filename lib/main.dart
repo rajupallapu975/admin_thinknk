@@ -1,3 +1,4 @@
+import 'package:admin_thinkink/services/notification_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -7,15 +8,21 @@ import 'pages/tabs/home_tab.dart';
 import 'pages/tabs/wallet_tab.dart';
 import 'pages/tabs/pending_tab.dart';
 import 'pages/tabs/profile_tab.dart';
+import 'pages/tabs/insights_tab.dart';
 import 'utils/app_colors.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'services/printer_service.dart';
 import 'models/app_user.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  if (kIsWeb) {
+    usePathUrlStrategy();
+  }
   
   try {
     await dotenv.load(fileName: ".env");
@@ -124,6 +131,7 @@ class _MyHomePageState extends State<MyHomePage> {
   Map<String, dynamic>? shopData;
   bool _isLoading = true;
   late PageController _pageController;
+  List<Widget>? _pages;
 
   @override
   void initState() {
@@ -131,16 +139,30 @@ class _MyHomePageState extends State<MyHomePage> {
     _pageController = PageController(initialPage: _selectedIndex);
     _fetchShopData();
     
-    // 🎧 Listen for print jobs to auto-navigate to Pending Tab
+    // 🎧 Initialize Global Notification Captain
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      GlobalNotificationService().init(context, widget.user.uid);
       final printerService = Provider.of<PrinterService>(context, listen: false);
       printerService.addListener(() {
         if (!mounted) return;
         if (printerService.isJobActive && _selectedIndex != 1) {
-          _onItemTapped(1);
+           WidgetsBinding.instance.addPostFrameCallback((_) {
+             if (mounted && _selectedIndex != 1) _onItemTapped(1);
+           });
         }
       });
     });
+  }
+
+  void _initializePages() {
+    _pages = [
+      HomeTab(user: widget.user),
+      PendingTab(user: widget.user),
+      InsightsTab(user: widget.user),
+      WalletTab(user: widget.user),
+      ProfileTab(user: widget.user, shopData: shopData),
+    ];
   }
 
   @override
@@ -155,12 +177,18 @@ class _MyHomePageState extends State<MyHomePage> {
       if (mounted) {
         setState(() {
           shopData = doc.data();
+          _initializePages(); // Initialize pages after data is fetched
           _isLoading = false;
         });
       }
     } catch (e) {
       debugPrint("Error fetching shop data: $e");
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() {
+          _initializePages(); // Still initialize with null data
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -184,12 +212,8 @@ class _MyHomePageState extends State<MyHomePage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    final List<Widget> pages = [
-      HomeTab(user: widget.user),
-      PendingTab(user: widget.user),
-      WalletTab(user: widget.user),
-      ProfileTab(user: widget.user, shopData: shopData),
-    ];
+    final double width = MediaQuery.of(context).size.width;
+    final bool isWide = width > 900;
 
     return PopScope(
       canPop: false,
@@ -197,150 +221,146 @@ class _MyHomePageState extends State<MyHomePage> {
         if (didPop) return;
         if (_selectedIndex != 0) {
           _onItemTapped(0);
-        } else {
-          // If on home tab, allow exit (actually we might want to show a confirm dialog or just exit)
-          // For now, we'll let the system handle it if we set canPop properly or use SystemNavigator.pop()
-          // But since canPop is false, we should handle exit manually if needed or just disable back on Home.
-          // Usually, reaching Home and pressing back again should exit.
-          // To allow exit on Home:
-          // Navigator.of(context).pop(); // This would only work if there's a route below.
-          // For a root page, we might want to just let it exit.
         }
       },
       child: Scaffold(
         backgroundColor: AppColors.background,
         body: Stack(
           children: [
-            PageView(
-              controller: _pageController,
-              onPageChanged: _onPageChanged,
-              physics: const BouncingScrollPhysics(),
-              children: pages,
+            Row(
+              children: [
+                if (isWide) 
+                  NavigationRail(
+                    selectedIndex: _selectedIndex,
+                    onDestinationSelected: _onItemTapped,
+                    labelType: NavigationRailLabelType.all,
+                    backgroundColor: AppColors.surface,
+                    selectedIconTheme: const IconThemeData(color: AppColors.primaryBlue),
+                    unselectedIconTheme: const IconThemeData(color: AppColors.textTertiary),
+                    selectedLabelTextStyle: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 11, color: AppColors.primaryBlue),
+                    unselectedLabelTextStyle: GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 11, color: AppColors.textTertiary),
+                    leading: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 24),
+                      child: Image.asset("assets/images/google_logo.png", width: 32),
+                    ),
+                    destinations: const [
+                      NavigationRailDestination(icon: Icon(Icons.home_filled), label: Text("HOME")),
+                      NavigationRailDestination(icon: Icon(Icons.pending_actions_rounded), label: Text("PENDING")),
+                      NavigationRailDestination(icon: Icon(Icons.insights_rounded), label: Text("INSIGHTS")),
+                      NavigationRailDestination(icon: Icon(Icons.account_balance_wallet_rounded), label: Text("WALLET")),
+                      NavigationRailDestination(icon: Icon(Icons.person_rounded), label: Text("PROFILE")),
+                    ],
+                  ),
+                
+                Expanded(
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: isWide ? 1200 : double.infinity),
+                      child: PageView(
+                        controller: _pageController,
+                        onPageChanged: _onPageChanged,
+                        physics: isWide ? const NeverScrollableScrollPhysics() : const BouncingScrollPhysics(),
+                        children: _pages ?? [],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-            // 🚀 PROFESSIONAL PRINT ASSISTANT OVERLAY (HP/Canon Style)
+            
+            // 🚀 PROFESSIONAL PRINT ASSISTANT OVERLAY (Glassmorphism & Anti-Overflow)
             Consumer<PrinterService>(
               builder: (context, service, child) {
                 if (!service.isJobActive) return const SizedBox.shrink();
                 
-                return Container(
-                  color: Colors.black.withValues(alpha: 0.85),
-                  width: double.infinity,
-                  height: double.infinity,
-                  child: Center(
-                    child: Container(
-                      width: 320,
-                      padding: const EdgeInsets.all(32),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(32),
-                        boxShadow: AppColors.mediumShadow,
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _buildAssistantIcon(service.currentJobState),
-                          const SizedBox(height: 28),
-                          Text(
-                            _getAssistantTitle(service.currentJobState),
-                            style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.textPrimary),
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            service.jobStatusMessage,
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.manrope(
-                              color: service.currentJobState == JobState.error ? AppColors.error : AppColors.textSecondary, 
-                              fontSize: 14, 
-                              fontWeight: FontWeight.w500
-                            ),
-                          ),
-                          const SizedBox(height: 32),
-                          if (service.currentJobState != JobState.error) ...[
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: LinearProgressIndicator(
-                                value: service.jobProgress,
-                                backgroundColor: AppColors.border,
-                                color: _getAssistantColor(service.currentJobState),
-                                minHeight: 10,
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                if (service.currentJobState == JobState.printing || service.currentJobState == JobState.queued)
-                                  const SizedBox(
-                                    width: 12,
-                                    height: 12,
-                                    child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(AppColors.primaryBlue)),
-                                  ),
-                                if (service.currentJobState != JobState.completed) ...[
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    "${(service.jobProgress * 100).toInt()}% TRANSMITTED",
-                                    style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.primaryBlue, letterSpacing: 1),
-                                  ),
-                                ] else 
-                                  Text(
-                                    "ALL TASKS COMPLETED",
-                                    style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.success, letterSpacing: 1),
-                                  ),
-                              ],
-                            ),
-                          ] else ...[
-                            ElevatedButton.icon(
-                              onPressed: () => _onItemTapped(pages.length - 1),
-                              icon: const Icon(Icons.settings_input_component_rounded, size: 18),
-                              label: const Text("CONFIGURE PRINTERS"),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppColors.error,
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            TextButton(
-                              onPressed: () {
-                                // Close functionality handled by service state in real app
-                              },
-                              child: const Text("DISMISS", style: TextStyle(color: AppColors.textTertiary)),
-                            ),
-                          ],
-                        ],
+                return Stack(
+                  children: [
+                    Positioned.fill(
+                      child: BackdropFilter(
+                        filter: ColorFilter.mode(Colors.black.withOpacity(0.8), BlendMode.darken),
+                        child: Container(color: Colors.transparent),
                       ),
                     ),
-                  ),
+                    Center(
+                      child: Container(
+                        width: 320,
+                        margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+                        padding: const EdgeInsets.all(32),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(32),
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 40, spreadRadius: 10)],
+                        ),
+                        child: SingleChildScrollView(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _buildAssistantIcon(service.currentJobState),
+                              const SizedBox(height: 28),
+                              Text(
+                                _getAssistantTitle(service.currentJobState),
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.textPrimary),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                service.jobStatusMessage,
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.manrope(
+                                  color: service.currentJobState == JobState.error ? AppColors.error : AppColors.textSecondary, 
+                                  fontSize: 14, 
+                                  fontWeight: FontWeight.w500
+                                ),
+                              ),
+                              const SizedBox(height: 32),
+                              if (service.currentJobState != JobState.error) ...[
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: LinearProgressIndicator(
+                                    value: service.jobProgress,
+                                    backgroundColor: AppColors.border,
+                                    color: _getAssistantColor(service.currentJobState),
+                                    minHeight: 10,
+                                  ),
+                                ),
+                              ],
+                              const SizedBox(height: 32),
+                              TextButton(
+                                onPressed: () => service.resetJobState(),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: AppColors.textTertiary,
+                                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                                child: const Text("DISMISS", style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 );
               },
             ),
           ],
         ),
-        bottomNavigationBar: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-           
-
-            BottomNavigationBar(
-              currentIndex: _selectedIndex,
-              onTap: _onItemTapped,
-              type: BottomNavigationBarType.fixed,
-              backgroundColor: AppColors.surface,
-              selectedItemColor: AppColors.primaryBlue,
-              unselectedItemColor: AppColors.textTertiary,
-              selectedLabelStyle: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 11),
-              unselectedLabelStyle: GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 11),
-              elevation: 8,
-              showSelectedLabels: true,
-              showUnselectedLabels: true,
-              items: const [
-                BottomNavigationBarItem(icon: Icon(Icons.home_filled), label: "HOME"),
-                BottomNavigationBarItem(icon: Icon(Icons.pending_actions_rounded), label: "PENDING"),
-                BottomNavigationBarItem(icon: Icon(Icons.account_balance_wallet_rounded), label: "WALLET"),
-                BottomNavigationBarItem(icon: Icon(Icons.person_rounded), label: "PROFILE"),
-              ],
-            ),
+        bottomNavigationBar: isWide ? null : BottomNavigationBar(
+          currentIndex: _selectedIndex,
+          onTap: _onItemTapped,
+          type: BottomNavigationBarType.fixed,
+          backgroundColor: AppColors.surface,
+          selectedItemColor: AppColors.primaryBlue,
+          unselectedItemColor: AppColors.textTertiary,
+          selectedLabelStyle: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 11),
+          unselectedLabelStyle: GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 11),
+          elevation: 8,
+          items: const [
+            BottomNavigationBarItem(icon: Icon(Icons.home_filled), label: "HOME"),
+            BottomNavigationBarItem(icon: Icon(Icons.pending_actions_rounded), label: "DELIVERIES"),
+            BottomNavigationBarItem(icon: Icon(Icons.insights_rounded), label: "INSIGHTS"),
+            BottomNavigationBarItem(icon: Icon(Icons.account_balance_wallet_rounded), label: "WALLET"),
+            BottomNavigationBarItem(icon: Icon(Icons.person_rounded), label: "PROFILE"),
           ],
         ),
       ),

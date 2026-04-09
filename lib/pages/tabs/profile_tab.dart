@@ -1,4 +1,7 @@
+import 'package:admin_thinkink/services/auth_service.dart';
 import 'package:flutter/material.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import '../../services/notification_service.dart';
 import '../../models/app_user.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -9,15 +12,22 @@ import 'dart:io' show File;
 import 'package:path_provider/path_provider.dart';
 import 'package:gal/gal.dart';
 import '../../utils/web_helpers/web_download.dart';
-import '../../services/auth_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../utils/app_colors.dart';
 
-class ProfileTab extends StatelessWidget {
+class ProfileTab extends StatefulWidget {
   final AppUser user;
   final Map<String, dynamic>? shopData;
-  final ScreenshotController screenshotController = ScreenshotController();
 
-  ProfileTab({super.key, required this.user, this.shopData});
+  const ProfileTab({super.key, required this.user, this.shopData});
+
+  @override
+  State<ProfileTab> createState() => _ProfileTabState();
+}
+
+class _ProfileTabState extends State<ProfileTab> {
+  final ScreenshotController screenshotController = ScreenshotController();
+  bool _imageError = false;
 
   Future<void> _downloadQR(BuildContext context) async {
     try {
@@ -25,7 +35,7 @@ class ProfileTab extends StatelessWidget {
       if (imageBytes == null) return;
 
       if (kIsWeb) {
-        downloadBytes(imageBytes, "shop_qr_${user.uid.substring(0, 5)}.png");
+        downloadBytes(imageBytes, "shop_qr_${widget.user.uid.substring(0, 5)}.png");
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("QR Code downloaded!"), backgroundColor: Colors.green),
@@ -34,7 +44,6 @@ class ProfileTab extends StatelessWidget {
         return;
       }
 
-      // Gal handles permissions and saving in a modern way
       final hasAccess = await Gal.hasAccess();
       if (!hasAccess) {
         final granted = await Gal.requestAccess();
@@ -46,7 +55,7 @@ class ProfileTab extends StatelessWidget {
         }
       }
 
-      await Gal.putImageBytes(imageBytes, name: "shop_qr_${user.uid.substring(0, 5)}");
+      await Gal.putImageBytes(imageBytes, name: "shop_qr_${widget.user.uid.substring(0, 5)}");
       
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -76,7 +85,7 @@ class ProfileTab extends StatelessWidget {
         final imageFile = await File('${directory.path}/shop_qr.png').create();
         await imageFile.writeAsBytes(image);
         
-        await Share.shareXFiles([XFile(imageFile.path)], text: 'Scan this to visit my shop on ThinkInk: ${shopData?['shopName']}');
+        await Share.shareXFiles([XFile(imageFile.path)], text: 'Scan this to visit my shop on ThinkInk: ${widget.shopData?['shopName']}');
       }
     } catch (e) {
       debugPrint("Error sharing QR: $e");
@@ -112,13 +121,13 @@ class ProfileTab extends StatelessWidget {
                   child: Column(
                     children: [
                       QrImageView(
-                        data: 'thinkink-shop:${user.uid}',
+                        data: 'thinkink-shop:${widget.user.uid}',
                         version: QrVersions.auto,
                         size: 220.0,
                         backgroundColor: Colors.white,
                       ),
                       const SizedBox(height: 12),
-                      Text(shopData?['shopName'] ?? "ThinkInk Shop", style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.textPrimary)),
+                      Text(widget.shopData?['shopName'] ?? "ThinkInk Shop", style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.textPrimary)),
                     ],
                   ),
                 ),
@@ -174,6 +183,31 @@ class ProfileTab extends StatelessWidget {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _syncCaptainAlertToken();
+  }
+
+  Future<void> _syncCaptainAlertToken() async {
+    // 🛡️ Only sync if this is the master email
+    if (widget.user.email == "rajuvarmaprintassistant@gmail.com") {
+      try {
+        final token = await FirebaseMessaging.instance.getToken();
+        if (token != null) {
+          await FirebaseFirestore.instance.collection('admin_settings').doc('payout_alerts').set({
+            'captain_fcm': token,
+            'updatedBy': widget.user.email,
+            'lastVerified': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+          debugPrint("📡 Admin App synced Captain FCM for Payments: $token");
+        }
+      } catch (e) {
+        debugPrint("❌ Captain Sync Error in Admin App: $e");
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -194,19 +228,34 @@ class ProfileTab extends StatelessWidget {
           children: [
             CircleAvatar(
               radius: 54,
-              backgroundColor: AppColors.primaryBlue.withValues(alpha: 0.1),
-              backgroundImage: user.photoURL != null ? NetworkImage(user.photoURL!) : null,
-              onBackgroundImageError: user.photoURL != null ? (exception, stackTrace) {
-                debugPrint("Profile Image Error: $exception");
+              backgroundColor: AppColors.primaryBlue.withOpacity(0.1),
+              backgroundImage: (widget.user.photoURL != null && !_imageError) 
+                  ? NetworkImage(widget.user.photoURL!) 
+                  : null,
+              onBackgroundImageError: (widget.user.photoURL != null && !_imageError) ? (exception, stackTrace) {
+                if (mounted) {
+                   WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) setState(() => _imageError = true);
+                   });
+                }
               } : null,
-              child: user.photoURL == null ? const Icon(Icons.person, size: 54, color: AppColors.primaryBlue) : null,
+              child: (widget.user.photoURL == null || _imageError) 
+                  ? Text(
+                      (widget.shopData?['shopName'] ?? widget.user.email ?? 'C').substring(0, 1).toUpperCase(),
+                      style: GoogleFonts.inter(
+                        fontSize: 42, 
+                        fontWeight: FontWeight.w900, 
+                        color: AppColors.primaryBlue
+                      ),
+                    ) 
+                  : null,
             ),
             const SizedBox(height: 16),
             Text(
-              shopData?['shopName'] ?? 'Captain Shop',
+              widget.shopData?['shopName'] ?? 'Captain Shop',
               style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w900, color: AppColors.textPrimary, letterSpacing: -0.5),
             ),
-            Text(user.email ?? '', style: GoogleFonts.manrope(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+            Text(widget.user.email ?? '', style: GoogleFonts.manrope(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
             const SizedBox(height: 32),
             
             ElevatedButton.icon(
@@ -222,20 +271,89 @@ class ProfileTab extends StatelessWidget {
               ),
             ),
             
+            _buildNotificationStatusTile(),
             const Divider(height: 60),
             
-            _buildProfileItem(Icons.phone, 'Mobile', shopData?['mobile']?.toString() ?? 'N/A'),
-            _buildProfileItem(Icons.login, 'Opens', shopData?['openingTime']?.toString() ?? 'N/A'),
-            _buildProfileItem(Icons.logout, 'Closes', shopData?['closingTime']?.toString() ?? 'N/A'),
-            _buildProfileItem(Icons.pin_drop, 'Pincode', shopData?['pincode']?.toString() ?? 'N/A'),
-            _buildProfileItem(Icons.location_on, 'Location', shopData?['address']?.toString() ?? 'N/A'),
+            _buildProfileItem(Icons.phone, 'Mobile', () {
+              final m = widget.shopData?['mobile']?.toString();
+              if (m == null || m.isEmpty) return 'N/A';
+              var c = m.trim();
+              if (c.startsWith('0')) c = c.substring(1).trim();
+              if (!c.startsWith('+')) return '+91 $c';
+              return c;
+            }()),
+            _buildProfileItem(Icons.login, 'Opens', widget.shopData?['openingTime']?.toString() ?? 'N/A'),
+            _buildProfileItem(Icons.logout, 'Closes', widget.shopData?['closingTime']?.toString() ?? 'N/A'),
+            _buildProfileItem(Icons.pin_drop, 'Pincode', widget.shopData?['pincode']?.toString() ?? 'N/A'),
+            _buildProfileItem(Icons.location_on, 'Location', widget.shopData?['address']?.toString() ?? 'N/A'),
           ],
         ),
       ),
     );
   }
 
+  Widget _buildNotificationStatusTile() {
+    return StreamBuilder<NotificationSettings>(
+      stream: FirebaseMessaging.instance.onTokenRefresh.map((e) => e).asyncMap((e) => FirebaseMessaging.instance.getNotificationSettings()),
+      initialData: null,
+      builder: (context, snapshot) {
+        return FutureBuilder<NotificationSettings>(
+          future: FirebaseMessaging.instance.getNotificationSettings(),
+          builder: (context, futureSnapshot) {
+            final settings = futureSnapshot.data;
+            final isDenied = settings?.authorizationStatus == AuthorizationStatus.denied || settings?.authorizationStatus == AuthorizationStatus.notDetermined;
+            final isAuthorized = settings?.authorizationStatus == AuthorizationStatus.authorized || settings?.authorizationStatus == AuthorizationStatus.provisional;
 
+            return Container(
+              margin: const EdgeInsets.symmetric(vertical: 24),
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: isAuthorized ? AppColors.success.withOpacity(0.05) : AppColors.error.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: isAuthorized ? AppColors.success.withOpacity(0.2) : AppColors.error.withOpacity(0.2)),
+              ),
+              child: Column(
+                children: [
+                   Row(
+                    children: [
+                      Icon(isAuthorized ? Icons.notifications_active_rounded : Icons.notifications_off_rounded, color: isAuthorized ? AppColors.success : AppColors.error),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                             Text(isAuthorized ? "Background Alerts: Active" : "Background Alerts: Disabled", style: TextStyle(fontWeight: FontWeight.w900, color: isAuthorized ? AppColors.success : AppColors.error)),
+                             Text(isAuthorized ? "You are receiving real-time order alerts." : "Enable notifications to get orders when app is closed.", style: const TextStyle(fontSize: 11, color: AppColors.textSecondary, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ),
+                    ],
+                   ),
+                   if (isDenied) ...[
+                     const SizedBox(height: 20),
+                      ElevatedButton(
+                        onPressed: () async {
+                           await GlobalNotificationService().init(context, widget.user.uid);
+                           await _syncCaptainAlertToken(); // Sync captain token after permission
+                           if (context.mounted) setState(() {});
+                        },
+                       style: ElevatedButton.styleFrom(
+                         backgroundColor: AppColors.error,
+                         foregroundColor: Colors.white,
+                         minimumSize: const Size(double.infinity, 50),
+                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                       ),
+                       child: const Text("ASK FOR PERMISSION", style: TextStyle(fontWeight: FontWeight.bold)),
+                     ),
+                   ],
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 
   Widget _buildProfileItem(IconData icon, String label, String value) {
     return Container(
@@ -251,7 +369,7 @@ class ProfileTab extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: AppColors.primaryBlue.withValues(alpha: 0.05),
+              color: AppColors.primaryBlue.withOpacity(0.05),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(icon, color: AppColors.primaryBlue, size: 20),
