@@ -10,8 +10,7 @@ import '../../models/app_user.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/order_model.dart';
-// import '../../services/notification_service.dart'; // Unused
-
+import '../../services/api_service.dart';
 import '../../utils/app_colors.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../order_details_page.dart';
@@ -464,89 +463,51 @@ class _HomeTabState extends State<HomeTab> {
             onPressed: () async {
               final scaffoldMessenger = ScaffoldMessenger.of(context);
               final navigator = Navigator.of(context);
-              final shopUid = widget.user.uid;
-              final backendUrl = dotenv.env['BACKEND_URL'] ?? 'https://thinkink-backend.onrender.com';
-
-              navigator.pop(); 
+              final String firstOrderId = items.isNotEmpty ? items.first.id : "";
               
-              setState(() {
-                _completedBatches.add(mainId);
-              });
-              await Future.delayed(const Duration(milliseconds: 600));
+              debugPrint("🔘 [ADMIN] Double Tick Clicked for Order: $mainId (DocID: $firstOrderId)");
 
-              FirebaseFirestore? psfcFirestore;
-              try {
-                final psfcApp = Firebase.app('psfc');
-                psfcFirestore = FirebaseFirestore.instanceFor(app: psfcApp);
-              } catch (_) { }
-
-              final List<Future<void>> updates = [];
-              for (var order in items) {
-                updates.add(() async {
-                  try {
-                    bool psfcDirectSuccess = false;
-                    if (psfcFirestore != null) {
-                       final List<String> userAppCols = ['xerox_shop_orders', 'xerox_orders', 'orders'];
-                       for (var col in userAppCols) {
-                         try {
-                           final ref = psfcFirestore.collection(col).doc(order.id);
-                           final doc = await ref.get();
-                           if (doc.exists) {
-                             await ref.update({
-                               'orderStatus': 'printing completed',
-                               'status': 'completed',
-                               'printStatus': FieldValue.delete(),
-                               'printedAt': FieldValue.delete(),
-                               'publicIds': FieldValue.delete(),
-                             });
-                             psfcDirectSuccess = true;
-                             debugPrint("✅ PSFC Direct Sync Success for ${order.id} in ($col)");
-                           }
-                         } catch (e) {
-                           debugPrint("⚠️ PSFC Direct Sync Error for ($col): $e");
-                         }
-                       }
-                    }
-
-                    // 🚀 BACKEND FALLBACK: Always trigger if direct write didn't confirm success
-                    if (!psfcDirectSuccess) {
-                      try {
-                        debugPrint("📡 Calling Backend Fallback (/mark-printed) for ${order.id}");
-                        final response = await http.post(
-                          Uri.parse('$backendUrl/mark-printed'),
-                          headers: {'Content-Type': 'application/json'},
-                          body: jsonEncode({'orderId': order.id}),
-                        ).timeout(const Duration(seconds: 10));
-                        
-                        if (response.statusCode == 200) {
-                           debugPrint("✅ Backend Fallback Success for ${order.id}");
-                        } else {
-                           debugPrint("❌ Backend Fallback Failed for ${order.id}: ${response.body}");
-                        }
-                      } catch (e) { 
-                        debugPrint("❌ Backend Fallback Error for ${order.id}: $e");
-                      }
-                    }
-
-                    // Always sync the local shop mirror (Admin DB)
-                    await _firestore.collection('shops').doc(shopUid).collection('orders').doc(order.id).update({
-                       'orderStatus': 'printing completed',
-                       'status': 'ready', 
-                       'timestamp': FieldValue.serverTimestamp(), 
-                    });
-                  } catch (e) {
-                    debugPrint("🔴 Order ${order.id} Fulfillment Error: $e");
-                  }
-                }());
+              if (firstOrderId.isEmpty) {
+                debugPrint("⚠️ [ADMIN] Error: No Order ID found for batch $mainId");
+                navigator.pop();
+                return;
               }
 
-              if (updates.isNotEmpty) await Future.wait(updates);
+              // 🚀 SHOW LOADING AS IT CALLS BACKEND
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (_) => const Center(child: CircularProgressIndicator(color: Colors.white)),
+              );
 
+              debugPrint("🛰️ [ADMIN] Sending 'Mark Printed' Request to Backend for $firstOrderId...");
+              final bool success = await ApiService.markAsPrinted(firstOrderId);
+              debugPrint("🔌 [ADMIN] Backend Response: ${success ? 'SUCCESS' : 'FAILURE'}");
+              
               if (mounted) {
-                 scaffoldMessenger.showSnackBar(const SnackBar(
-                  content: Text("Print confirmed! Moved to Deliveries."), 
-                  backgroundColor: Colors.green,
-                ));
+                Navigator.pop(context); // Close loading
+                navigator.pop(); // Close confirm dialog
+              }
+
+              if (success) {
+                debugPrint("✨ [ADMIN] UI Updating: Batch $mainId marked as completed locally.");
+                setState(() {
+                  _completedBatches.add(mainId);
+                });
+                if (mounted) {
+                  scaffoldMessenger.showSnackBar(const SnackBar(
+                    content: Text("✅ Print Sync Success! Customer notified."),
+                    backgroundColor: Colors.green,
+                  ));
+                }
+              } else {
+                debugPrint("❌ [ADMIN] Sync failed for $firstOrderId. Check backend logs.");
+                if (mounted) {
+                  scaffoldMessenger.showSnackBar(const SnackBar(
+                    content: Text("❌ Sync Failed. Please check internet or use fallback."),
+                    backgroundColor: Colors.red,
+                  ));
+                }
               }
             },
             child: Text("PRINT DONE", style: GoogleFonts.inter(fontWeight: FontWeight.w800)),
@@ -592,13 +553,8 @@ class _HomeTabState extends State<HomeTab> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.end,
             children: [
-               Container(
-                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                 decoration: BoxDecoration(color: AppColors.primaryBlue.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
-                 child: Text("#$mainId-$subIdx", style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w900, color: AppColors.primaryBlue)),
-               ),
-               const Spacer(),
                if (order.orderStatus == 'printing completed')
                   const Icon(Icons.check_circle_rounded, color: Colors.green, size: 18),
             ],
@@ -608,7 +564,25 @@ class _HomeTabState extends State<HomeTab> {
             children: [
               Icon(fileName.toLowerCase().endsWith('.pdf') ? Icons.picture_as_pdf_rounded : Icons.insert_drive_file_rounded, size: 16, color: fileName.toLowerCase().endsWith('.pdf') ? AppColors.error : AppColors.primaryBlue),
               const SizedBox(width: 12),
-              Expanded(child: Text(fileName, style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis)),
+              Expanded(
+                child: Builder(
+                  builder: (context) {
+                    final lowUrl = fileUrl?.toLowerCase() ?? "";
+                    final lowName = fileName.toLowerCase();
+                    String ext = "pdf";
+                    if (lowUrl.contains(".jpg") || lowUrl.contains(".jpeg") || lowUrl.contains("format=jpg") || lowName.contains(".jpg") || lowName.contains(".jpeg")) {
+                      ext = "jpg";
+                    } else if (lowUrl.contains(".png") || lowUrl.contains("format=png") || lowName.contains(".png")) {
+                      ext = "png";
+                    }
+                    return Text(
+                      "${mainId}_$subIdx.$ext", 
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textPrimary), 
+                      maxLines: 1, overflow: TextOverflow.ellipsis
+                    );
+                  }
+                )
+              ),
             ],
           ),
           const SizedBox(height: 12),

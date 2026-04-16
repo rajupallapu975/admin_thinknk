@@ -59,9 +59,12 @@ dependencies:
   gal: ^2.1.2
   device_info_plus: ^11.1.1
   mobile_scanner: ^7.2.0
-  flutter_local_notifications: ^21.0.0
+  flutter_local_notifications: ^17.2.3
+  timezone: ^0.9.4
+  flutter_timezone: ^2.1.0
   audioplayers: ^6.6.0
   firebase_messaging: ^15.2.10
+  shared_preferences: ^2.5.5
 
 dev_dependencies:
   flutter_test:
@@ -89,6 +92,7 @@ flutter:
   assets:
     - .env
     - assets/images/google_logo.png
+    - assets/images/captain_logo.png
     - assets/sounds/
 
   # An image asset can refer to one or more resolution-specific "variants", see

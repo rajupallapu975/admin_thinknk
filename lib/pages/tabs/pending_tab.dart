@@ -28,58 +28,6 @@ class _PendingTabState extends State<PendingTab> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final Set<String> _expandedBatches = {};
 
-  Future<void> _clearCompletedOrders(List<OrderModel> completed) async {
-    final bool? confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Clear History"),
-        content: Text("Delete all ${completed.length} completed orders from this list?"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true), 
-            style: TextButton.styleFrom(foregroundColor: AppColors.error),
-            child: const Text("Delete All"),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      final shopRef = _firestore.collection('shops').doc(widget.user.uid);
-      final batch = _firestore.batch();
-      
-      // 🏗️ PSFC Account access
-      final psfcApp = Firebase.app('psfc');
-      final psfcFirestore = FirebaseFirestore.instanceFor(app: psfcApp);
-      final psfcBatch = psfcFirestore.batch();
-
-      for (var order in completed) {
-        // 1. Delete from shop subcollection
-        batch.delete(shopRef.collection('orders').doc(order.id));
-
-        // 2. Cascade delete from central collections
-        for (var col in ['xerox_shop_orders', 'xerox_orders', 'orders']) {
-           psfcBatch.delete(psfcFirestore.collection(col).doc(order.id));
-        }
-      }
-
-      try {
-        await Future.wait([
-          batch.commit(),
-          psfcBatch.commit().catchError((_) => null), // Silently fail if PSFC docs don't exist
-        ]);
-        if (mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("History cleared & synced."), backgroundColor: Colors.grey));
-        }
-      } catch (e) {
-         if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Partial cleanup error: $e"), backgroundColor: Colors.red));
-         }
-      }
-    }
-  }
-
   Future<void> _showScanDialog(String mainId, List<OrderModel> items) async {
     final orderId = items.first.id;
     final bool? scanResult = await Navigator.push(
@@ -168,7 +116,6 @@ class _PendingTabState extends State<PendingTab> {
           
           // 🧩 STRICT Filtering with .trim() for maximum robustness:
           final pendingOrders = allOrders.where((o) => o.orderStatus.toLowerCase().trim() == 'printing completed').toList();
-          final completedOrders = allOrders.where((o) => o.orderStatus.toLowerCase().trim() == 'order completed').toList();
 
           return LayoutBuilder(
             builder: (context, constraints) {
@@ -185,24 +132,7 @@ class _PendingTabState extends State<PendingTab> {
                     const SizedBox(height: 32),
                   ],
                   
-                  if (completedOrders.isNotEmpty) ...[
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(child: _buildSectionHeader("RECENTLY COMPLETED", Icons.check_circle_rounded, Colors.grey)),
-                        TextButton.icon(
-                          onPressed: () => _clearCompletedOrders(completedOrders),
-                          icon: const Icon(Icons.delete_sweep_rounded, size: 18, color: Colors.grey),
-                          label: const Text("Clear All", style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
-                        )
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    _buildResponsiveGrid(_groupAndBuildOrders(completedOrders, isCompleted: true), constraints.maxWidth),
-                    const SizedBox(height: 16),
-                  ],
-
-                  if (pendingOrders.isEmpty && completedOrders.isEmpty)
+                  if (pendingOrders.isEmpty)
                     _buildEmptyState(),
                 ],
               );
@@ -415,16 +345,8 @@ class _PendingTabState extends State<PendingTab> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.end,
             children: [
-               Container(
-                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                 decoration: BoxDecoration(
-                   color: (isCompleted ? Colors.grey : AppColors.error).withOpacity(0.1),
-                   borderRadius: BorderRadius.circular(6),
-                 ),
-                 child: Text("#$mainId-$subIdx", style: GoogleFonts.inter(fontSize: isSmallScreen ? 9 : 10, fontWeight: FontWeight.w900, color: isCompleted ? Colors.grey : AppColors.error)),
-               ),
-               const Spacer(),
                Container(
                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                  decoration: BoxDecoration(color: (isCompleted ? Colors.grey : Colors.green).withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
@@ -443,10 +365,22 @@ class _PendingTabState extends State<PendingTab> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  fileName, 
-                  style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: isSmallScreen ? 13 : 14, color: AppColors.textPrimary),
-                  maxLines: 1, overflow: TextOverflow.ellipsis
+                child: Builder(
+                  builder: (context) {
+                    final lowUrl = fileUrl?.toLowerCase() ?? "";
+                    final lowName = fileName.toLowerCase();
+                    String ext = "pdf";
+                    if (lowUrl.contains(".jpg") || lowUrl.contains(".jpeg") || lowUrl.contains("format=jpg") || lowName.contains(".jpg") || lowName.contains(".jpeg")) {
+                      ext = "jpg";
+                    } else if (lowUrl.contains(".png") || lowUrl.contains("format=png") || lowName.contains(".png")) {
+                      ext = "png";
+                    }
+                    return Text(
+                      "${mainId}_$subIdx.$ext",
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: isSmallScreen ? 13 : 14, color: AppColors.textPrimary),
+                      maxLines: 1, overflow: TextOverflow.ellipsis
+                    );
+                  }
                 ),
               ),
             ],
@@ -518,22 +452,25 @@ class _PendingTabState extends State<PendingTab> {
                   onTap: () async {
                     if (fileUrl == null) return;
                     try {
-                      final extension = fileName.contains('.') ? fileName.split('.').last : (fileUrl.split('.').last);
-                      final downloadName = "${mainId}_$subIdx.$extension";
+                      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'https://thinkink-backend.onrender.com';
                       
-                      if (kIsWeb) {
-                        await WebDownloader.downloadFile(fileUrl, downloadName);
-                      } else {
-                        await launchUrl(Uri.parse(fileUrl), mode: LaunchMode.externalApplication);
+                      final lowUrl = fileUrl.toLowerCase();
+                      final lowName = fileName.toLowerCase();
+                      String cleanExt = "pdf";
+                      if (lowUrl.contains(".jpg") || lowUrl.contains(".jpeg") || lowUrl.contains("format=jpg") || lowName.contains(".jpg") || lowName.contains(".jpeg")) {
+                        cleanExt = "jpg";
+                      } else if (lowUrl.contains(".png") || lowUrl.contains("format=png") || lowName.contains(".png")) {
+                        cleanExt = "png";
                       }
+
+                      final downloadName = "${mainId}_$subIdx.$cleanExt";
+                      final encodedUrl = Uri.encodeComponent(fileUrl);
+                      final proxyUrl = "$backendUrl/proxy-download?url=$encodedUrl&filename=$downloadName";
+                      await launchUrl(Uri.parse(proxyUrl), mode: LaunchMode.externalApplication);
                     } catch (e) {
-                      debugPrint('Direct download failed: $e');
-                      try {
-                        await launchUrl(Uri.parse(fileUrl), mode: LaunchMode.externalApplication);
-                      } catch (err) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Download failed: $err')));
-                        }
+                      debugPrint('🔴 Download proxy failed: $e');
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not trigger download: $e')));
                       }
                     }
                   },

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../../utils/app_colors.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class LoginPage extends StatelessWidget {
   const LoginPage({super.key});
@@ -46,14 +47,10 @@ class LoginPage extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: AppColors.primaryBlue, borderRadius: BorderRadius.circular(8)),
-                child: const Icon(Icons.print_rounded, color: Colors.white, size: 20),
-              ),
+              Image.asset("assets/images/captain_logo.png", width: 40),
               const SizedBox(width: 12),
               Text(
-                "ThinkInk Admin",
+                "THINKINK CAPTAIN",
                 style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.primaryBlack, letterSpacing: -0.5),
               ),
             ],
@@ -111,6 +108,8 @@ class LoginPage extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Image.asset("assets/images/captain_logo.png", width: 120),
+        const SizedBox(height: 32),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(color: AppColors.primaryBlue.withOpacity(0.1), borderRadius: BorderRadius.circular(100)),
@@ -247,12 +246,38 @@ class LoginPage extends StatelessWidget {
 
   Widget _buildFooter() {
     return Container(
-      padding: const EdgeInsets.all(40),
+      padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 24),
       color: AppColors.background,
-      child: Center(
-        child: Text(
-          "© 2026 ThinkInk Professional Printing Solutions",
-          style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary, fontWeight: FontWeight.w600),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _footerSupportLink("Technical Support", "mailto:rajupallapu975@gmail.com"),
+              const SizedBox(width: 24),
+              _footerSupportLink("Business Inquiries", "tel:+919391392506"),
+            ],
+          ),
+          const SizedBox(height: 32),
+          Text(
+            "© 2026 ThinkInk Professional Printing Solutions",
+            style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _footerSupportLink(String label, String url) {
+    return InkWell(
+      onTap: () => launchUrl(Uri.parse(url)),
+      child: Text(
+        label,
+        style: GoogleFonts.inter(
+          fontSize: 13, 
+          color: AppColors.primaryBlue, 
+          fontWeight: FontWeight.w800,
+          decoration: TextDecoration.underline,
         ),
       ),
     );

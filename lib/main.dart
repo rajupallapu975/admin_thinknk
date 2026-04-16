@@ -7,6 +7,7 @@ import 'auth_wrapper.dart';
 import 'pages/tabs/home_tab.dart';
 import 'pages/tabs/wallet_tab.dart';
 import 'pages/tabs/pending_tab.dart';
+import 'pages/tabs/history_tab.dart';
 import 'pages/tabs/profile_tab.dart';
 import 'pages/tabs/insights_tab.dart';
 import 'utils/app_colors.dart';
@@ -15,6 +16,7 @@ import 'package:provider/provider.dart';
 import 'services/printer_service.dart';
 import 'models/app_user.dart';
 import 'package:flutter/foundation.dart';
+import 'services/history_service.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
 
 void main() async {
@@ -67,6 +69,7 @@ void main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => PrinterService()),
+        ChangeNotifierProvider(create: (_) => HistoryService()..init()),
       ],
       child: const MyApp(),
     ),
@@ -143,6 +146,10 @@ class _MyHomePageState extends State<MyHomePage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       GlobalNotificationService().init(context, widget.user.uid);
+      
+      // 🕵️ Start tracking orders for local history preservation
+      Provider.of<HistoryService>(context, listen: false).startListening(widget.user.uid);
+      
       final printerService = Provider.of<PrinterService>(context, listen: false);
       printerService.addListener(() {
         if (!mounted) return;
@@ -159,6 +166,7 @@ class _MyHomePageState extends State<MyHomePage> {
     _pages = [
       HomeTab(user: widget.user),
       PendingTab(user: widget.user),
+      HistoryTab(user: widget.user),
       InsightsTab(user: widget.user),
       WalletTab(user: widget.user),
       ProfileTab(user: widget.user, shopData: shopData),
@@ -241,11 +249,12 @@ class _MyHomePageState extends State<MyHomePage> {
                     unselectedLabelTextStyle: GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 11, color: AppColors.textTertiary),
                     leading: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 24),
-                      child: Image.asset("assets/images/google_logo.png", width: 32),
+                      child: Image.asset("assets/images/captain_logo.png", width: 50),
                     ),
                     destinations: const [
                       NavigationRailDestination(icon: Icon(Icons.home_filled), label: Text("HOME")),
                       NavigationRailDestination(icon: Icon(Icons.pending_actions_rounded), label: Text("PENDING")),
+                      NavigationRailDestination(icon: Icon(Icons.history_rounded), label: Text("HISTORY")),
                       NavigationRailDestination(icon: Icon(Icons.insights_rounded), label: Text("INSIGHTS")),
                       NavigationRailDestination(icon: Icon(Icons.account_balance_wallet_rounded), label: Text("WALLET")),
                       NavigationRailDestination(icon: Icon(Icons.person_rounded), label: Text("PROFILE")),
@@ -256,11 +265,27 @@ class _MyHomePageState extends State<MyHomePage> {
                   child: Center(
                     child: ConstrainedBox(
                       constraints: BoxConstraints(maxWidth: isWide ? 1200 : double.infinity),
-                      child: PageView(
-                        controller: _pageController,
-                        onPageChanged: _onPageChanged,
-                        physics: isWide ? const NeverScrollableScrollPhysics() : const BouncingScrollPhysics(),
-                        children: _pages ?? [],
+                      child: Scaffold(
+                        appBar: isWide ? null : AppBar(
+                          backgroundColor: Colors.transparent,
+                          title: Row(
+                            children: [
+                              Image.asset("assets/images/captain_logo.png", height: 32),
+                              const SizedBox(width: 8),
+                              Text("CAPTAIN", style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 18)),
+                            ],
+                          ),
+                          actions: [
+                             IconButton(icon: const Icon(Icons.notifications_none_rounded), onPressed: () {}),
+                             const SizedBox(width: 8),
+                          ],
+                        ),
+                        body: PageView(
+                          controller: _pageController,
+                          onPageChanged: _onPageChanged,
+                          physics: isWide ? const NeverScrollableScrollPhysics() : const BouncingScrollPhysics(),
+                          children: _pages ?? [],
+                        ),
                       ),
                     ),
                   ),
@@ -358,6 +383,7 @@ class _MyHomePageState extends State<MyHomePage> {
           items: const [
             BottomNavigationBarItem(icon: Icon(Icons.home_filled), label: "HOME"),
             BottomNavigationBarItem(icon: Icon(Icons.pending_actions_rounded), label: "DELIVERIES"),
+            BottomNavigationBarItem(icon: Icon(Icons.history_rounded), label: "HISTORY"),
             BottomNavigationBarItem(icon: Icon(Icons.insights_rounded), label: "INSIGHTS"),
             BottomNavigationBarItem(icon: Icon(Icons.account_balance_wallet_rounded), label: "WALLET"),
             BottomNavigationBarItem(icon: Icon(Icons.person_rounded), label: "PROFILE"),

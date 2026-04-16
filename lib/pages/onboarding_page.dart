@@ -162,7 +162,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
         'email': AuthService().currentUser?.email,
         'activePrinters': 1,
         'isCurrentlyOpen': true,
-        'pricePerBWPage': 3.0,
+        'pricePerBWPage': 2.0,
         'pricePerColorPage': 10.0,
       };
 

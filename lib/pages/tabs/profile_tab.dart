@@ -14,6 +14,7 @@ import 'package:gal/gal.dart';
 import '../../utils/web_helpers/web_download.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../utils/app_colors.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class ProfileTab extends StatefulWidget {
   final AppUser user;
@@ -286,6 +287,124 @@ class _ProfileTabState extends State<ProfileTab> {
             _buildProfileItem(Icons.logout, 'Closes', widget.shopData?['closingTime']?.toString() ?? 'N/A'),
             _buildProfileItem(Icons.pin_drop, 'Pincode', widget.shopData?['pincode']?.toString() ?? 'N/A'),
             _buildProfileItem(Icons.location_on, 'Location', widget.shopData?['address']?.toString() ?? 'N/A'),
+            
+            const SizedBox(height: 32),
+            _buildSupportCenter(),
+            const SizedBox(height: 60),
+
+            // 🚪 PROMINENT LOGOUT BUTTON
+            OutlinedButton.icon(
+              onPressed: () => _showLogoutConfirmation(context),
+              icon: const Icon(Icons.logout_rounded, size: 18),
+              label: const Text("SIGN OUT OF SESSION", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 0.5)),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.error,
+                side: BorderSide(color: AppColors.error.withOpacity(0.2)),
+                minimumSize: const Size(double.infinity, 60),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              ),
+            ),
+            const SizedBox(height: 40),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showLogoutConfirmation(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        title: Text("Sign Out?", style: GoogleFonts.inter(fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
+        content: const Text("Are you sure you want to exit your shop manager session?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text("CANCEL", style: TextStyle(color: AppColors.textTertiary, fontWeight: FontWeight.bold)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              AuthService().signOut();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text("SIGN OUT"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSupportCenter() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: AppColors.primaryBlue.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: AppColors.primaryBlue.withOpacity(0.1)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: const BoxDecoration(color: AppColors.primaryBlue, shape: BoxShape.circle),
+                child: const Icon(Icons.headset_mic_rounded, color: Colors.white, size: 18),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                "Support Center", 
+                style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.textPrimary)
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "Need help with your shop or printer? Contact our technical team.",
+            style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textSecondary, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 24),
+          _buildSupportAction(
+            Icons.mail_outline_rounded, 
+            "rajupallapu975@gmail.com", 
+            () => launchUrl(Uri.parse("mailto:rajupallapu975@gmail.com"))
+          ),
+          const SizedBox(height: 12),
+          _buildSupportAction(
+            Icons.phone_in_talk_rounded, 
+            "+91 9391392506", 
+            () => launchUrl(Uri.parse("tel:+919391392506"))
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSupportAction(IconData icon, String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))],
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: AppColors.primaryBlue),
+            const SizedBox(width: 12),
+            Text(label, style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.textPrimary)),
+            const Spacer(),
+            const Icon(Icons.arrow_forward_ios_rounded, size: 12, color: AppColors.textTertiary),
           ],
         ),
       ),

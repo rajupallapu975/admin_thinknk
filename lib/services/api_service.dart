@@ -47,6 +47,20 @@ class ApiService {
     }
   }
 
+  static Future<bool> markAsPrinted(String orderId) async {
+    try {
+      final response = await _client.post(
+        Uri.parse('$_baseUrl/mark-printed'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'orderId': orderId}),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint("API: markAsPrinted error: $e");
+      return false;
+    }
+  }
+
   static Future<Map<String, dynamic>> getWalletSummary(String shopId) async {
     try {
       final response = await _client.get(

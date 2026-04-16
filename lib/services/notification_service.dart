@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../utils/app_colors.dart';
 
 // 🛡️ High-fidelity top-level background handler for Android (Closed App state)
@@ -16,6 +17,7 @@ class GlobalNotificationService {
   GlobalNotificationService._internal();
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
   bool _isInitialized = false;
   String? _shopId;
   final DateTime _startTime = DateTime.now();
@@ -25,17 +27,40 @@ class GlobalNotificationService {
     _shopId = shopId;
     _isInitialized = true;
 
+    // 🛡️ Initialize Local Notifications (System Level)
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const InitializationSettings initializationSettings =
+        InitializationSettings(android: initializationSettingsAndroid);
+    await _localNotifications.initialize(
+      initializationSettings,
+    );
+
+    // 🛡️ Create High-Importance Channel
+    if (!kIsWeb) {
+      const AndroidNotificationChannel channel = AndroidNotificationChannel(
+        'admin_orders',
+        'Incoming Orders',
+        description: 'New shop orders and payout alerts',
+        importance: Importance.max,
+        playSound: true,
+        enableVibration: true,
+      );
+      await _localNotifications
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+              ?.createNotificationChannel(channel);
+    }
+
     // 🔔 FCM Infrastructure setup (Background alerts support)
     final messaging = FirebaseMessaging.instance;
     try {
       await messaging.requestPermission(alert: true, badge: true, sound: true);
       
       // 🛡️ Sync FCM Token for backend-triggered closed-app notifications
-      // VAPID key is required for Web background support (if using customized FCM VAPID)
       final String? token = await messaging.getToken();
       if (token != null) {
-        await _firestore.collection('shops').doc(shopId).update({'fcmToken': token});
-        debugPrint("📡 FCM Token Synced for closed-state alerts: $token");
+        await _firestore.collection('shops').doc(shopId).set({'fcmToken': token}, SetOptions(merge: true));
+        debugPrint("📡 Admin FCM Token Synced: $token");
       }
       
       if (!kIsWeb) {
@@ -89,8 +114,27 @@ class GlobalNotificationService {
     });
   }
 
-  void _triggerAlert(BuildContext context, String title, String subtitle) {
-    // Show persistent snackbar or custom overlay
+  Future<void> _triggerAlert(BuildContext context, String title, String subtitle) async {
+    // 🛡️ 1. Show System-Level Notification (High Priority)
+    if (!kIsWeb) {
+      const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+        'admin_orders',
+        'Incoming Orders',
+        channelDescription: 'Alerts for new orders',
+        importance: Importance.max,
+        priority: Priority.high,
+        playSound: true,
+      );
+      const NotificationDetails details = NotificationDetails(android: androidDetails);
+      await _localNotifications.show(
+        DateTime.now().millisecondsSinceEpoch % 100000,
+        title,
+        subtitle,
+        details,
+      );
+    }
+
+    // 🛡️ 2. Show persistent snackbar for foreground feedback
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

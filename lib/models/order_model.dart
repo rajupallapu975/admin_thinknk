@@ -150,4 +150,28 @@ class OrderModel {
   factory OrderModel.fromJson(Map<String, dynamic> json) {
     return OrderModel.fromMap(json, json['id']?.toString() ?? json['orderId']?.toString() ?? '');
   }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'customerName': customerName,
+    'fileName': fileName,
+    'bwPages': bwPages,
+    'colorPages': colorPages,
+    'isDuplex': isDuplex,
+    'orderStatus': orderStatus,
+    'paymentStatus': paymentStatus,
+    'amount': amount,
+    'timestamp': timestamp.toIso8601String(),
+    'fileUrl': fileUrl,
+    'fileUrls': fileUrls,
+    'orderCode': orderCode,
+    'copies': copies,
+    'lastPrinterUsed': lastPrinterUsed,
+    'orientation': orientation,
+    'customerPhone': customerPhone,
+    'fileNames': fileNames,
+    'fileSettings': fileSettings,
+    'viewUrls': viewUrls,
+    'customId': customId,
+  };
 }
