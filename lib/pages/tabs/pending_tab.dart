@@ -452,7 +452,7 @@ class _PendingTabState extends State<PendingTab> {
                   onTap: () async {
                     if (fileUrl == null) return;
                     try {
-                      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'https://thinkink-backend.onrender.com';
+                      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://13.233.76.8:5001';
                       
                       final lowUrl = fileUrl.toLowerCase();
                       final lowName = fileName.toLowerCase();

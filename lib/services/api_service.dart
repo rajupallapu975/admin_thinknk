@@ -6,7 +6,7 @@ import 'platform_client_factory.dart';
 import '../models/order_model.dart';
 
 class ApiService {
-  static final String _baseUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:3000';
+  static final String _baseUrl = dotenv.env['BACKEND_URL'] ?? 'http://13.233.76.8:5001';
 
   // Create a client that handles platform-specific requirements
   static http.Client get _client => PlatformClient.getClient();
