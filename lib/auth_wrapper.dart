@@ -1,5 +1,7 @@
+import 'package:admin_thinkink/utils/app_colors.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'main.dart';
 import 'models/app_user.dart';
 import 'services/auth_service.dart';
@@ -27,6 +29,39 @@ class AuthWrapper extends StatelessWidget {
               if (onboardSnapshot.connectionState == ConnectionState.waiting) {
                 return const Scaffold(
                   body: Center(child: CircularProgressIndicator()),
+                );
+              }
+
+              // Handle errors (e.g., Firestore permission denied)
+              if (onboardSnapshot.hasError) {
+                return Scaffold(
+                  body: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.error_outline, color: Colors.red, size: 48),
+                          const SizedBox(height: 16),
+                          Text(
+                            "Connection Error",
+                            style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 18),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            onboardSnapshot.error.toString(),
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.manrope(color: AppColors.textSecondary),
+                          ),
+                          const SizedBox(height: 24),
+                          ElevatedButton(
+                            onPressed: () => AuthService().signOut(),
+                            child: const Text("SIGN OUT & RETRY"),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 );
               }
 

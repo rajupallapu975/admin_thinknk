@@ -37,7 +37,7 @@ void main() async {
           projectId: "thinkink-admin",
           storageBucket: "thinkink-admin.firebasestorage.app",
           messagingSenderId: "1071627103248", 
-          appId: "1:1071627103248:web:a67da5bcbf4d1ad29bae95", // Update with your actual Web App ID for thinkink-admin
+          appId: "1:1071627103248:web:a67da5bcbf4d1ad29bae95", 
         ),
       );
     } else {
@@ -54,7 +54,7 @@ void main() async {
            projectId: "psfc-43b5a",
            storageBucket: "psfc-43b5a.firebasestorage.app",
            messagingSenderId: "52763236709", 
-           appId: "1:52763236709:web:11febe982e11361937e98c", 
+           appId: "1:52763236709:web:ccc19f87fcfdc4dc37e98c", 
         ),
       );
       debugPrint("🚀 PSFC Secondary App Initialized");
@@ -196,6 +196,14 @@ class _MyHomePageState extends State<MyHomePage> {
           _initializePages(); // Still initialize with null data
           _isLoading = false;
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Error loading shop: $e"),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 10),
+            action: SnackBarAction(label: "RETRY", textColor: Colors.white, onPressed: _fetchShopData),
+          ),
+        );
       }
     }
   }
