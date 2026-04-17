@@ -103,6 +103,6 @@ class PrintHandler(http.server.BaseHTTPRequestHandler):
         else:
             self._set_headers(404)
 
-print(f"🚀 ThinkInk Hardware Bridge running on http://localhost:{PORT}")
+print(f"🚀 ThinkInk Hardware Bridge running on http://13.233.76.8:5001")
 with socketserver.TCPServer(("", PORT), PrintHandler) as httpd:
     httpd.serve_forever()
